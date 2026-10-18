@@ -76,7 +76,7 @@ local vine=entity("lunarthrall_plant_vine_end",6,0);vine.tags.lunarthrall_plant_
 local mode,picked=b:Tick(head);assert(mode=="attack" and picked==vine)
 head.tags.retaliates=nil;head.anim="tired_loop_large";mode,picked=b:Tick(vine);assert(picked==head)
 -- Bomb starts earlier, with time to clear the cloud; actual cloud remains a path obstacle.
-local bomb=entity("sporebomb");bomb.components.timer={GetTimeLeft=function() return 1.2 end}
+local bomb=entity("sporebomb");bomb.components.timer={GetTimeLeft=function() return 1.6 end}
 assert(#b:Zones({bomb})==0);bomb.components.timer.GetTimeLeft=function() return .4 end
 assert(#b:Zones({bomb})==1)
 local cloud=entity("sporecloud");cloud.tags.sporecloud=true

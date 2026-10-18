@@ -1,0 +1,933 @@
+diff --git a/README.md b/README.md
+index d9da7ba..ece81cc 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # 影子 · Shadow Self / Cry for me
+ 
+-《饥荒联机版》纯客户端 Mod，游戏内名称为“如影随形(测试版)”。当前版本 **0.12.20**，作者：**舒晴伊子**。
++《饥荒联机版》纯客户端 Mod，游戏内名称为“如影随形(测试版)”。当前版本 **0.12.21**，作者：**舒晴伊子**。
+ 
+ ## 主要功能
+ 
+@@ -8,7 +8,7 @@
+ - **离线对话**：结合游戏状态、近期事件、对话历史和伪记忆选择回应；内置16种MBTI对话人格，右键影子可选择。文字与对话逻辑在本地运行，不调用外部AI服务。
+ - **头顶说话**：影子及接管后的角色头顶显示回应；字体颜色可选红橙黄绿青蓝紫，默认红色；人物说话声音默认开启，可在Mod设置关闭。
+ - **授权接管**：通过对话提出任务，影子申请接管，经同意并完成覆盖演出后执行；支持战斗接管按钮，人物脚下显示同意或停止按钮。
+-- **自动战斗与走位**：内置走A及自动走位，支持武器/护甲选择、手杖赶路、群怪攻击检查，以及蜂后等Boss的专门处理。战斗接管保持到玩家主动停止。
++- **自动战斗与走位**：内置走A及自动走位，支持武器/护甲选择、手杖赶路、群怪攻击检查，以及蜂后等Boss的专门处理；联机时预留出刀、撤离时间，侧方冲刺可抢占当前攻击或躲避。战斗接管保持到玩家主动停止。
+ - **料理与调味**：连续使用多个锅做饭，遍历附近可用容器获取食材，收获并存放成品；支持沃利专属料理、研磨调味粉和调味流程。
+ - **钓鱼与日常任务**：支持池塘钓鱼、海钓，以及砍树、挖矿、采集、拾取、制作和移动等任务。
+ - **战斗音乐**：可选择接管战斗时播放内置BGM，音量跟随游戏音乐设置。
+@@ -42,4 +42,4 @@
+ 
+ ## 当前验证状态
+ 
+-49组Lua 5.1离线回归通过。离线检查不等同于实际联机战斗验证，Boss走位和音画效果仍需游戏内测试。
++51组Lua 5.1离线回归通过。离线检查不等同于实际联机战斗验证，Boss走位和音画效果仍需游戏内测试。
+diff --git a/modinfo.lua b/modinfo.lua
+index 21f85f2..ba6d0b2 100644
+--- a/modinfo.lua
++++ b/modinfo.lua
+@@ -1,15 +1,15 @@
+ name = "如影随形(测试版)"
+ description = "安静地跟着你的另一个自己。纯客户端本地影子与离线对话。\n仅聊天输入栏：右键拖动，回车发送。护甲槽上方可战斗接管。"
+ author = "舒晴伊子"
+-version = "0.12.20"
++version = "0.12.21"
+ api_version = 10
+ dst_compatible = true
+ client_only_mod = true
+ all_clients_require_mod = false
+ server_only_mod = false
+-configuration_options = {
+-    {name="speech_color",label="影子说话字体颜色",options={{description="红",data="red"},{description="橙",data="orange"},{description="黄",data="yellow"},{description="绿",data="green"},{description="青",data="cyan"},{description="蓝",data="blue"},{description="紫",data="purple"}},default="red"},
+-    {name="speech_voice",label="影子说话是否有声音",options={{description="是",data=true},{description="否",data=false}},default=true},
++configuration_options = {
++    {name="speech_color",label="影子说话字体颜色",options={{description="红",data="red"},{description="橙",data="orange"},{description="黄",data="yellow"},{description="绿",data="green"},{description="青",data="cyan"},{description="蓝",data="blue"},{description="紫",data="purple"}},default="red"},
++    {name="speech_voice",label="影子说话是否有声音",options={{description="是",data=true},{description="否",data=false}},default=true},
+     {name="battle_music",label="接管战斗后燃起来",hover="接管战斗时播放所提供的雨爱BGM，停止战斗时关闭。",options={{description="是",data=true},{description="否",data=false}},default=true},
+     {name="leash", label="自主活动范围（码）", options={{description="5",data=5},{description="8",data=8},{description="10",data=10},{description="12",data=12},{description="15",data=15}}, default=15},
+     {name="frequency", label="主动对话间隔", options={{description="安静（45秒）",data=45},{description="默认（25秒）",data=25},{description="健谈（12秒）",data=12}}, default=25},
+diff --git a/scripts/shadowself/control/attackwindow.lua b/scripts/shadowself/control/attackwindow.lua
+new file mode 100644
+index 0000000..82ab8ee
+--- /dev/null
++++ b/scripts/shadowself/control/attackwindow.lua
+@@ -0,0 +1,54 @@
++-- 蜂后/龙蝇按下一次命中截止时间预留进场、出刀、退场；只约束远程客户端。
++local Net=require("shadowself/control/nettiming")
++local Nav=require("shadowself/control/navigation")
++local M={}
++local function profile(e)
++ if not e then return end
++ if require("shadowself/control/status").Sleeping(e) or require("shadowself/control/status").Frozen(e) then return end
++ if e.prefab=="beequeen" then return {hit=14,period=TUNING.BEEQUEEN_ATTACK_PERIOD or 2,radius=(TUNING.BEEQUEEN_HIT_RANGE or 6),bait=TUNING.BEEQUEEN_ATTACK_RANGE or 4} end
++ if e.prefab=="warg" or e.prefab=="mutatedwarg" or e.prefab=="claywarg" or e.prefab=="gingerbreadwarg" then
++  for _,n in ipairs({"atk_breath_pre","atk_breath_loop","atk_breath_pst"}) do if e.AnimState and e.AnimState:IsCurrentAnimation(n) then return end end
++  return {hit=11,period=TUNING.WARG_ATTACKPERIOD or 3,radius=TUNING.WARG_ATTACKRANGE or 4,bait=TUNING.WARG_ATTACKRANGE or 4}
++ end
++ if e.prefab=="dragonfly" then return {hit=15,period=TUNING.DRAGONFLY_ATTACK_PERIOD or 4,radius=TUNING.DRAGONFLY_HIT_RANGE or 5,bait=TUNING.DRAGONFLY_ATTACK_RANGE or 4} end
++end
++function M.Observe(c,e)
++ if not Net.Remote() then return end
++ local cfg=profile(e);if not cfg or not e.AnimState then return end
++ c.attack_windows=c.attack_windows or setmetatable({},{__mode="k"})
++ local s=c.attack_windows[e] or {};c.attack_windows[e]=s
++ local active=e.AnimState:IsCurrentAnimation("atk");local f=e.AnimState:GetCurrentAnimationFrame() or 0
++ if active and (not s.active or f<(s.frame or 0)) then
++  local ping=TheNet and TheNet.GetPing and TheNet:GetPing() or 0
++  s.start=GetTime()-f*(FRAMES or 1/30)-ping/2000;s.bait_retreat=nil
++ end
++ s.active=active;s.frame=f;return s,cfg
++end
++function M.Blocked(c,e)
++ if not c or not c.player or not Net.Remote() then return false end
++ local s,cfg=M.Observe(c,e);if not s then return false end
++ if s.active and s.frame<=cfg.hit+2 then return true end
++ if not s.start then return e.prefab=="beequeen" end
++ local p=c.player:GetPosition();local q=e:GetPosition();local distance=math.sqrt(p:DistSq(q))
++ local reach=(c.gear and c.gear.AttackRange and c.gear:AttackRange() or 2)+e:GetPhysicsRadius(0)
++ local safe=cfg.radius+c.player:GetPhysicsRadius(0)+.4
++ local speed=Net.Speed(c)
++ local cost=math.max(0,distance-reach)/speed+.3+math.max(0,safe-reach)/speed+Net.Delay(c)+2/30
++ return s.start+cfg.period+cfg.hit/30-GetTime()<=cost
++end
++function M.Tick(c,e)
++ local s,cfg=M.Observe(c,e);if not s or not M.Blocked(c,e) then return false end
++ local p=c.player:GetPosition();local q=e:GetPosition();local d=math.max(.01,math.sqrt(p:DistSq(q)))
++ local radius=cfg.radius+c.player:GetPhysicsRadius(0)+.5
++ if cfg.bait and (not s.start or not s.active and GetTime()>=s.start+cfg.period) then
++  local bait=cfg.bait+c.player:GetPhysicsRadius(0)-.05
++  if d<=bait then s.bait_retreat=true;s.retry=GetTime()+.7 end
++  if s.bait_retreat and GetTime()>=(s.retry or 0) and d>=radius-.2 then s.bait_retreat=nil end
++  if not s.bait_retreat then radius=bait end
++ end
++ local goal=Vector3(q.x+(p.x-q.x)/d*radius,0,q.z+(p.z-q.z)/d*radius)
++ local point=Nav.Select(c,goal,e)
++ c.bridge:PauseAttack();c.travel:BeginDodge(c.snapshot);c:Move(point,"联机战斗 · 留出退场时间，先撤再补刀")
++ return true
++end
++return M
+diff --git a/scripts/shadowself/control/beequeen.lua b/scripts/shadowself/control/beequeen.lua
+index 1b223e1..199a439 100644
+--- a/scripts/shadowself/control/beequeen.lua
++++ b/scripts/shadowself/control/beequeen.lua
+@@ -75,6 +75,7 @@ function Queen:ReleaseTravel()
+     self.travelling=nil
+ end
+ function Queen:Strike(queen,pos,qp,distance)
++    if require("shadowself/control/attackwindow").Tick(self.c,queen) then return true end
+     if self.c.gear then self.c.gear.forced_weapon=nil end
+     local c=self.c;local combat=c.player.replica and c.player.replica.combat
+     local reach=(c.gear and c.gear.AttackRange and c.gear:AttackRange() or combat and combat.GetAttackRangeWithWeapon and combat:GetAttackRangeWithWeapon() or 2)
+diff --git a/scripts/shadowself/control/bosses.lua b/scripts/shadowself/control/bosses.lua
+index b62b7bc..7e37adf 100644
+--- a/scripts/shadowself/control/bosses.lua
++++ b/scripts/shadowself/control/bosses.lua
+@@ -74,6 +74,9 @@ function Boss:AttackBlocked(e)
+  if self.c.brightshade_target and e~=self.c.brightshade_target then return true end
+  if not e then return false end
+  if (e.prefab=="rook" or e.prefab=="rook_nightmare") and (anim(e,"atk") or not (self.rooks[e] and self.rooks[e].ready)) then return true end
++ if e.prefab=="mutatedbearger" then
++  for _,zone in ipairs(self.c.hazards or {}) do if zone.bearger_pit and e:GetPosition():DistSq(zone.pos)<zone.radius^2 then return true end end
++ end
+  if e.prefab=="minotaur" and self.guardian and self.guardian.target==e and self.guardian.active and not require("shadowself/control/guardian").Stunned(e) and not self.routes:Leap(e) then return true end
+  if e.prefab=="rabbitking_aggressive" and (anim(e,"dropkick_pre") or anim(e,"dropkick_loop") or anim(e,"spawn_pre") or anim(e,"spawn_loop") or anim(e,"despawn") and frame(e)>=47) then return true end
+  return e:HasTag("lunarthrall_plant") and waking(e) or (e.prefab=="slurtle" or e.prefab=="snurtle") and (e:HasTag("shell") or anim(e,"hide") or anim(e,"hide_loop") or anim(e,"emerge"))
+@@ -215,12 +218,14 @@ function Boss:Crystal(target)
+      local t=len>0 and math.max(0,math.min(1,((q.x-p.x)*dx+(q.z-p.z)*dz)/len)) or 0
+      local closest=Vector3(p.x+dx*t,0,p.z+dz*t)
+      if closest:DistSq(q)>=body*body and Nav.Safe(c,v,target) then
+-      local value=second and v:DistSq(q) or math.abs(math.cos(a-theta))*30+p:DistSq(v)*.05
++      -- 第一发严格横向，不选择朝Boss走；第二发才选择靠近点燃。
++      local toward=(v.x-p.x)*(q.x-p.x)+(v.z-p.z)*(q.z-p.z)
++      local value=second and v:DistSq(q) or math.abs(math.cos(a-theta))*30+p:DistSq(v)*.05+(toward>0 and 10000 or 0)
+       value=value+Nav.Risk(c,v,target)*100
+       if not score or value<score then best,score=v,value end
+      end
+     end
+-    s.escape=best or Nav.Select(c,Vector3(mark.x+math.cos(theta)*6.8,0,mark.z+math.sin(theta)*6.8),target)
++    s.escape=best or Nav.Select(c,Vector3(mark.x+math.cos(theta+(second and 0 or math.pi/2))*6.8,0,mark.z+math.sin(theta+(second and 0 or math.pi/2))*6.8),target)
+    end
+    return self:Move(s.escape,second and "晶鹿 · 躲开第二发同时准备点燃" or "晶鹿 · 横移离开冰锥完整范围",target)
+   end
+@@ -283,7 +288,8 @@ function Boss:Zones(entities)
+  local function add(e,r,pos) zones[#zones+1]={pos=pos or e:GetPosition(),radius=r,source=e} end
+  for _,e in ipairs(entities) do if live(e) then
+   seen[e]=true;local n=e.prefab;local ep=e:GetPosition()
+-  if n=="sporecloud" and e:HasTag("sporecloud") then add(e,(TUNING.TOADSTOOL_SPORECLOUD_RADIUS or 3.5)+.8)
++  if n=="bearger_sinkhole" and not anim(e,"disappear") then add(e,(TUNING.MUTATED_BEARGER_SINKHOLERADIUS or 3)+c.player:GetPhysicsRadius(0)+.35);zones[#zones].bearger_pit=true
++  elseif n=="sporecloud" and e:HasTag("sporecloud") then add(e,(TUNING.TOADSTOOL_SPORECLOUD_RADIUS or 3.5)+.8)
+   elseif n=="mushroombomb" or n=="mushroombomb_dark" then
+    local late=false
+    if anim(e,"explode_pre") then
+@@ -291,7 +297,7 @@ function Boss:Zones(entities)
+     local earliest=length*.5-frame(e)*FRAMES
+     local radius=(TUNING.TOADSTOOL_MUSHROOMBOMB_RADIUS or 3.5)+.5
+     local exit=math.max(0,radius-math.sqrt(p:DistSq(ep)))/(c.Speed and math.max(1,c:Speed()) or 6)
+-    late=earliest<=exit+.15+(c.Latency and c:Latency() or .1)
++    late=earliest<=exit+.3+require("shadowself/control/nettiming").Delay(c)
+    end
+    if late then add(e,(TUNING.TOADSTOOL_MUSHROOMBOMB_RADIUS or 3.5)+.5) end
+   elseif n=="sporebomb" then
+@@ -301,7 +307,7 @@ function Boss:Zones(entities)
+    local latency=c.Latency and c:Latency() or .1
+    local lead=math.max(24*FRAMES,5/(c.Speed and math.max(1,c:Speed()) or 6)+latency+.15)
+    local par=e._shadowself_bomb_owner or e.entity and e.entity:GetParent()
+-   if remaining<= (par==c.player and math.min(1,.55+latency) or lead) then
++   if remaining<= (par==c.player and math.max(1,5/(c.Speed and math.max(1,c:Speed()) or 6)+latency+.25) or lead+.15) then
+     local center=par and par.GetPosition and par:GetPosition() or ep
+     if par==c.player or par==c.player.entity then
+      center=p;self.bomb_imminent=e
+@@ -420,8 +426,20 @@ function Boss:Rabbit(target)
+   self.c.bridge:PauseAttack();return "support",target
+  end
+ end
++function Boss:Bearger(target)
++ if target.prefab~="mutatedbearger" then return end
++ local c=self.c;local p=c.player:GetPosition();local qp=target:GetPosition()
++ for _,zone in ipairs(c.hazards or {}) do if zone.bearger_pit and qp:DistSq(zone.pos)<zone.radius^2 then
++  local dx,dz=p.x-zone.pos.x,p.z-zone.pos.z;local d=math.sqrt(dx*dx+dz*dz)
++  if d<.01 then dx,dz,d=1,0,1 end
++  local goal=Vector3(zone.pos.x+dx/d*(zone.radius+7),0,zone.pos.z+dz/d*(zone.radius+7))
++  return self:Move(goal,"装甲熊獾 · 避开减速坑，先把Boss引出来",target)
++ end end
++end
+ function Boss:Tick(target)
+  local c=self.c;local p=c.player:GetPosition()
++ if (target.prefab=="dragonfly" or target.prefab=="warg" or target.prefab=="mutatedwarg" or target.prefab=="claywarg" or target.prefab=="gingerbreadwarg") and require("shadowself/control/attackwindow").Tick(c,target) then return "move",target end
++ local bear_mode,bear_target=self:Bearger(target);if bear_mode then return bear_mode,bear_target end
+  local guardian_mode,guardian_target=require("shadowself/control/guardian").Tick(self,target)
+  if guardian_mode then return guardian_mode,guardian_target end
+  if self.c.brightshade_target or target:HasTag("lunarthrall_plant") or target:HasTag("lunarthrall_plant_end") or Plant.Middle(target) then
+diff --git a/scripts/shadowself/control/combat.lua b/scripts/shadowself/control/combat.lua
+index 56c8114..abf5a14 100644
+--- a/scripts/shadowself/control/combat.lua
++++ b/scripts/shadowself/control/combat.lua
+@@ -17,6 +17,8 @@ function Bridge:Start(plan,matches)
+         if options then self.options[key]={present=options[key]~=nil,value=options[key]};options[key]=value end
+     end
+     option("hitandrun_dodgetest","dodgetest",true)
++    option("hitandrun_walkway","walkway",true)
++    option("hitandrun_walktime","walktime",1)
+     option("hitandrun_targetmode","targetmode",false)
+     option("hitandrun_priority_undermouse","priority_undermouse",false)
+     self.plan=plan;self.clear_since=nil;self.next_finish_scan=nil;self.finished=false
+@@ -110,6 +112,7 @@ function Bridge:PauseAttack()
+     if self.thread and self.thread.co and self.thread.co==coroutine.running() then
+         self.pause_requested=true;return
+     end
++    local resume_point=self.pause_requested and self.coordinator and self.coordinator.blocked and self.coordinator.last_point
+     self.pause_requested=nil
+     if self:OwnsThread() then
+         Debug.Event(self.coordinator,"native_pause",{target=Debug.Entity(self.h.ent)})
+@@ -121,6 +124,12 @@ function Bridge:PauseAttack()
+         end
+     end
+     self.thread=nil
++    if self.h then self.h.shadowself_dodging=nil end
++    if resume_point then
++        -- 原线程退出会StopWalking；同帧重发已交给机制的退场点，不能等100ms移动节流。
++        self.native.POS_util:GoToPoint(resume_point.x,resume_point.z)
++        self.coordinator.next_move=GetTime()+.1
++    end
+ end
+ function Bridge:ResumeAttack()
+     if self:OwnsThread() then return end
+@@ -173,6 +182,8 @@ function Bridge:Supervise()
+                     if picked and picked~=target then target=picked;h.ent=target;self.wrappers.PreTheLoop.old(h) end
+                     if support or mode=="move" or mode=="support" then
+                         self:PauseAttack()
++                    elseif self:OwnsThread() and h.shadowself_dodging then
++                        c.travel:UpdateDodge(c.snapshot)
+                     else
+                         local d=math.sqrt(self.player:GetPosition():DistSq(target:GetPosition()))
+                         local reach=c.gear:AttackRange()+target:GetPhysicsRadius(0)
+@@ -182,7 +193,9 @@ function Bridge:Supervise()
+                             c.travel.restore_dodge=nil;c.travel.role="move"
+                             c.special_active=false;c.queen_active=false;c.blocked=false
+                             local data=h:IsAttackPre(target,1)
+-                            if data then h:DoDodge(data)
++                            if data then
++                                -- 原线程执行躲避，监督协程继续检查侧方。
++                                self.chasing=nil;c.travel.chasing=nil;self:ResumeAttack()
+                             else
+                                 local special=target.prefab=="beequeen" or target.prefab=="beeguard"
+                                 if special then c:NativePulse() end
+@@ -270,6 +283,12 @@ function Bridge:Coordinate(plan)
+         local current=function(object,...) return fn(old,object,...) end
+         self.wrappers[name]={old=old,current=current};h[name]=current
+     end
++    self.saved.shadowself_backstep={value=self.h.shadowself_backstep}
++    self.h.shadowself_backstep=function(point,target)
++        return target and self.coordinator.secondary:Point(point,target) or point
++    end
++    self.saved.shadowself_latency_frames={value=self.h.shadowself_latency_frames}
++    self.h.shadowself_latency_frames=function() return require("shadowself/control/nettiming").Frames(self.coordinator) end
+     wrap("PreTheLoop",function(old,object,...)
+         old(object,...);self.coordinator:NativePulse()
+         if not self.coordinator.special_active then self.coordinator.secondary:Pulse() end
+@@ -280,6 +299,7 @@ function Bridge:Coordinate(plan)
+         wrap(name,function(old,object,...)
+             local c=self.coordinator
+             if self.pause_requested then return false end
++            if require("shadowself/control/attackwindow").Blocked(c,object.ent) then return false end
+             local explicit=...;local victim=(name=="CloseAndAttack" or name=="ShouldAtkWhenDodging") and type(explicit)=="table" and explicit.prefab and explicit or object.ent
+             if require("shadowself/control/targetpolicy").Rook(victim) and require("shadowself/control/targetpolicy").Other(self,victim) then return false end
+             if c.crabking and c.crabking:Active() and not c.crabking:Allowed(victim) then return false end
+@@ -290,7 +310,7 @@ function Bridge:Coordinate(plan)
+             if object.ent and not self.allowed(object.ent) then return false end
+             if c.bosses and c.bosses.AttackBlocked and c.bosses:AttackBlocked(object.ent) then return false end
+             if self.chasing then return false end
+-            if c.special_active and c.blocked then return false end
++            if c.blocked and (c.special_active or not self:OwnsThread()) then return false end
+             if not c.secondary:BeforeAttack(name=="ShouldAtkWhenDodging") then return false end
+             if name=="CloseAndAttack" then
+                 if c.travel.finish_deferred then c.travel:EndDodge(c.snapshot) end
+diff --git a/scripts/shadowself/control/coordinator.lua b/scripts/shadowself/control/coordinator.lua
+index 0c17eb3..b50d6f8 100644
+--- a/scripts/shadowself/control/coordinator.lua
++++ b/scripts/shadowself/control/coordinator.lua
+@@ -75,7 +75,7 @@ end
+ function Coordinator:Scan()
+     local now=GetTime()
+     if now<(self.next_scan or 0) then return end
+-    self.next_scan=now+.1;self.enemies={};self.observed={}
++    self.next_scan=now+.05;self.enemies={};self.observed={}
+     local pos=self.player:GetPosition()
+     self.hazards={}
+     for _,e in ipairs(TheSim:FindEntities(pos.x,pos.y,pos.z,24)) do
+@@ -96,6 +96,7 @@ function Coordinator:Scan()
+             and (e:HasTag("hostile") or e:HasTag("monster") or ec.GetTarget and ec:GetTarget()==self.player)
+         if self.bridge.allowed(e) or threat or require("shadowself/control/plant").Middle(e) then
+             self.enemies[#self.enemies+1]=e
++            require("shadowself/control/attackwindow").Observe(self,e)
+             -- 攻击前摇来自 3014 原表，不使用旧 AI 的攻击帧表。
+             local idle=self.h.idle_ticks
+             local dodge=rawpre(self.h,e,0)
+diff --git a/scripts/shadowself/control/guarddefence.lua b/scripts/shadowself/control/guarddefence.lua
+index c16e941..b0a598c 100644
+--- a/scripts/shadowself/control/guarddefence.lua
++++ b/scripts/shadowself/control/guarddefence.lua
+@@ -3,7 +3,7 @@ local G={}
+ function G.Tick(q,queen,now)
+  local c=q.c;local p=c.player;local a=queen.AnimState
+  local frame=a.GetCurrentAnimationFrame and a:GetCurrentAnimationFrame() or 0
+- local winding=a:IsCurrentAnimation("atk") and frame<14
++ local winding=a:IsCurrentAnimation("atk") and frame<14+require("shadowself/control/nettiming").Frames(c)
+  local hit=(TUNING.BEEQUEEN_HIT_RANGE or 6)+(p.GetPhysicsRadius and p:GetPhysicsRadius(0) or .5)+.25
+  local inside=p:GetPosition():DistSq(queen:GetPosition())<(hit+.15)^2
+  local state=q.guard_escape
+@@ -14,7 +14,7 @@ function G.Tick(q,queen,now)
+    require("shadowself/control/queendebug").Event(c,"guard_dodge_start",{queen_frame=frame,pos=require("shadowself/control/queendebug").Point(p:GetPosition())})
+   end
+   local latency=c.Latency and c:Latency() or .1
+-  state.untiltime=now+(14-frame)*(FRAMES or 1/30)+latency
++  state.untiltime=now+math.max(0,(14-frame)*(FRAMES or 1/30))+latency
+   -- 与蜂后本体走位共用实际径向逃脱算法，不再在守卫环绕候选里折中躲避。
+   if not state.point then
+   local data=require("shadowself/control/queenattack")(c,queen,false)
+diff --git a/scripts/shadowself/control/incoming.lua b/scripts/shadowself/control/incoming.lua
+index a8d11b8..d108d3d 100644
+--- a/scripts/shadowself/control/incoming.lua
++++ b/scripts/shadowself/control/incoming.lua
+@@ -4,9 +4,9 @@ local M={}
+ local function anim(e,n) return e.AnimState and e.AnimState:IsCurrentAnimation(n) end
+ function M.Lane(c,e)
+  local n=e.prefab;local speed;local width
+- if (n=="rook" or n=="rook_nightmare") and anim(e,"atk") then speed=16
+- elseif n=="rabbitking_aggressive" and (anim(e,"dropkick_loop") or anim(e,"dropkick_pre") and e.AnimState:GetCurrentAnimationFrame()>=6) then speed=12
+- elseif (n=="eyeofterror" or n=="twinofterror1" or n=="twinofterror2") and (anim(e,"charge_loop") or anim(e,"charge_pre") and e.AnimState:GetCurrentAnimationFrame()>=25) then speed=16
++ if (n=="rook" or n=="rook_nightmare") and (anim(e,"atk") or anim(e,"paw_loop") or anim(e,"atk_pre") and e.AnimState:GetCurrentAnimationFrame()>=math.max(0,15-require("shadowself/control/nettiming").Frames(c))) then speed=16
++ elseif n=="rabbitking_aggressive" and (anim(e,"dropkick_loop") or anim(e,"dropkick_pre") and e.AnimState:GetCurrentAnimationFrame()>=math.max(0,6-require("shadowself/control/nettiming").Frames(c))) then speed=12
++ elseif (n=="eyeofterror" or n=="twinofterror1" or n=="twinofterror2") and (anim(e,"charge_loop") or anim(e,"charge_pre") and e.AnimState:GetCurrentAnimationFrame()>=math.max(0,25-require("shadowself/control/nettiming").Frames(c))) then speed=16
+  elseif n=="daywalker" and (anim(e,"atk3") or anim(e,"run_pre")) then speed=11;width=3+c.player:GetPhysicsRadius(0)+.6
+  elseif n=="shadowthrall_hands" and (anim(e,"run_pre") or anim(e,"run_loop")) then speed=12;width=1.8+c.player:GetPhysicsRadius(0)+.5
+  elseif n=="sharkboi" and (anim(e,"torpedo_loop") or anim(e,"torpedo_jump")) then speed=16
+@@ -21,6 +21,23 @@ function M.Risk(l,p)
+  if along>=-l.width and along<=l.length and side<l.width then return (l.width-side)+1 end
+  return 0
+ end
++-- A尚未出手时，也检查走到攻击边缘的短路径，不能迈进侧方冲撞通道。
++function M.ApproachBlocked(c,entities,target)
++ if not target then return false end
++ local lanes={}
++ for _,e in ipairs(entities or {}) do if e~=target and e:IsValid() then
++  local lane=M.Lane(c,e);if lane then lanes[#lanes+1]=lane end
++ end end
++ if #lanes==0 then return false end
++ local p=c.player:GetPosition();local q=target:GetPosition();local d=math.max(.01,math.sqrt(p:DistSq(q)))
++ local reach=(c.gear and c.gear.AttackRange and c.gear:AttackRange() or 2)+target:GetPhysicsRadius(0)
++ local length=math.max(0,d-reach)
++ for _,lane in ipairs(lanes) do for i=0,4 do
++  local step=length*i/4;local point=Vector3(p.x+(q.x-p.x)*step/d,0,p.z+(q.z-p.z)*step/d)
++  if M.Risk(lane,point)>0 then return true end
++ end end
++ return false
++end
+ function M.Point(c,entities)
+  local lanes={};local danger=false;local p=c.player:GetPosition()
+  for _,e in ipairs(entities or {}) do if e~=c.h.ent and e:IsValid() then
+diff --git a/scripts/shadowself/control/nettiming.lua b/scripts/shadowself/control/nettiming.lua
+new file mode 100644
+index 0000000..b736fe5
+--- /dev/null
++++ b/scripts/shadowself/control/nettiming.lua
+@@ -0,0 +1,11 @@
++-- 延迟预算用于提前决策，不修改实际怪物帧或人物移速。
++local M={}
++function M.Delay(c)
++ if c and c.Latency then return c:Latency() end
++ local ping=TheNet and TheNet.GetPing and TheNet:GetPing() or 0
++ return math.min(.6,ping/1000+.1)
++end
++function M.Frames(c) return math.ceil(M.Delay(c)/(FRAMES or 1/30)) end
++function M.Speed(c) return math.max(1,math.min(6,c.Speed and c:Speed() or 6)) end
++function M.Remote() return TheWorld and TheWorld.ismastersim==false end
++return M
+diff --git a/scripts/shadowself/control/queenattack.lua b/scripts/shadowself/control/queenattack.lua
+index c4f3743..68aef73 100644
+--- a/scripts/shadowself/control/queenattack.lua
++++ b/scripts/shadowself/control/queenattack.lua
+@@ -1,9 +1,9 @@
+ -- SGbeequeen: locked target DoAttack at frame 14, HIT_RANGE=6. No cone dodge.
+ return function(c,queen,base)
+     local a=queen.AnimState
+-    if not a:IsCurrentAnimation("atk") or a:GetCurrentAnimationFrame()>=14 then return base end
++    if not a:IsCurrentAnimation("atk") or a:GetCurrentAnimationFrame()>=14+require("shadowself/control/nettiming").Frames(c) then return base end
+     local radius=c.player.GetPhysicsRadius and c.player:GetPhysicsRadius(0) or .5
+-    c.queen_dodge=c.queen_dodge or {atkanim="atk",point="target",update=true,angle=0}
++    c.queen_dodge=c.queen_dodge or {atkanim="atk",point="target",update=true,angle=0,noattack=true}
+     c.queen_dodge.dist=(TUNING.BEEQUEEN_HIT_RANGE or 6)+radius+.25
+     if c.beequeen and c.player.GetPosition then
+         c.queen_dodge.fn=function(_,start,finish,angle,dist)
+diff --git a/scripts/shadowself/control/queendebug.lua b/scripts/shadowself/control/queendebug.lua
+index 35f09a3..8bf89f0 100644
+--- a/scripts/shadowself/control/queendebug.lua
++++ b/scripts/shadowself/control/queendebug.lua
+@@ -1,5 +1,5 @@
+ -- 蜂后调试已移除。保留空接口供历史调用点使用，不采样、不计数、不打印。
+-local M={VERSION="0.12.20",enabled=false}
++local M={VERSION="0.12.21",enabled=false}
+ local function noop() end
+ for _,name in ipairs({"Configure","Start","Event","Change","Throttle","Block","Performed","Equip","Move","Hit","Sample"}) do M[name]=noop end
+ function M.End(c) if c then c._queen_debug=nil end end
+diff --git a/scripts/shadowself/control/routes.lua b/scripts/shadowself/control/routes.lua
+index 263fefb..2ec3d6d 100644
+--- a/scripts/shadowself/control/routes.lua
++++ b/scripts/shadowself/control/routes.lua
+@@ -41,8 +41,9 @@ function Routes:AntPoint(e)
+  -- 先尝试同一个时针方向的小步，长度不随离Boss的半径放大。
+  for _,side in ipairs({preferred,-preferred}) do
+   for _,length in ipairs({1.75,2,2.25}) do
+-   local a=theta+side*2*math.asin(math.min(.95,length/(2*radius)))
+-   local point=Vector3(ep.x+math.cos(a)*radius,0,ep.z+math.sin(a)*radius)
++   local a=theta+side*math.atan(length/radius)
++   local r=radius/math.cos(a-theta)
++   local point=Vector3(ep.x+math.cos(a)*r,0,ep.z+math.sin(a)*r)
+    if Nav.Risk(c,point,e)==0 and planner.Corridor(c,p,point,e) then self.sides[e]=side;return point end
+   end
+  end
+@@ -210,7 +211,7 @@ function Routes:Dodge(e,base)
+   for _,name in ipairs({"atk_breath_pre","atk_breath_loop","atk_breath_pst"}) do
+    if anim(e,name) then return self:OrbitData(e,name,true) end
+   end
+-  if anim(e,"atk") and frame(e)<=11 then return {atkanim="atk",point="target",dist=5,update=false,angle=0,noattack=true} end
++  if anim(e,"atk") and frame(e)<=11+require("shadowself/control/nettiming").Frames(self.c) then return {atkanim="atk",point="target",dist=5,update=false,angle=0,noattack=true} end
+  end
+  if require("shadowself/control/plant").Weak(e) then return false end
+  if e.HasTag and (e:HasTag("lunarthrall_plant_end") or e:HasTag("lunarthrall_plant_segment")) then
+@@ -231,18 +232,19 @@ function Routes:Dodge(e,base)
+   for _,name in ipairs({"attack_pre","attack","cast_pre"}) do
+    if anim(e,name) and (name~="attack" or frame(e)<=3) then
+     local state=self.antlion;local f=frame(e)
+-    if not state or state.target~=e or name=="attack_pre" and (state.name~="attack_pre" or f<state.frame) then
+-     state={target=e,name=name,point=self:AntPoint(e),frame=f};self.antlion=state
++    if not state or state.target~=e or (name=="attack_pre" or name=="cast_pre") and (state.name~=name or f<state.frame) then
++     state={target=e,name=name,point=self:AntPoint(e),origin=self.c.player:GetPosition(),frame=f};self.antlion=state
+     end
+     state.frame=f;state.name=name
+     if not state.done and not Nav.Safe(self:AntContext(),state.point,e) then state.point=self:AntPoint(e) end
+-    if self.c.player:GetPosition():DistSq(state.point)<.12^2 then
++    if self.c.player:GetPosition():DistSq(state.point)<.12^2 and state.origin and state.origin:DistSq(state.point)>.25 then
+      state.done=true
+     end
+     if state.done then return false end
+     return {atkanim=name,point="player",dist=1.5,update=false,exclusive=true,noattack=true,fn=function() return state.point end}
+    end
+   end
++  self.antlion=nil
+  elseif n=="vault_pillar_guard" then
+   if anim(e,"atk_1") and frame(e)<29 then return self:OrbitData(e,"atk_1",true) end
+   if anim(e,"atk_2") and frame(e)<26 then return self:OrbitData(e,"atk_2",true) end
+diff --git a/scripts/shadowself/control/secondary.lua b/scripts/shadowself/control/secondary.lua
+index 4389444..898d500 100644
+--- a/scripts/shadowself/control/secondary.lua
++++ b/scripts/shadowself/control/secondary.lua
+@@ -7,6 +7,7 @@ local Secondary=Class(function(self,c)
+ end)
+ function Secondary:Scan()
+     local now=GetTime()
++    self.hazards=self.c.hazards or {}
+     if now<(self.next_scan or 0) then return end
+     self.next_scan=now+.05;self.enemies={};self.observed={};self.data={}
+     local c=self.c;local p=self.player:GetPosition()
+@@ -109,7 +110,7 @@ function Secondary:Wrap(primary,data,checktab)
+     end
+     local c=self.c
+     if c.charge_target==primary then return data end -- keep fixed straight charge dodge
+-    local has_other=false
++    local has_other=#self.hazards>0
+     for _,e in ipairs(self.enemies) do if e~=primary then has_other=true;break end end
+     if not has_other then return data end
+     local cached=self.cache[primary]
+@@ -135,6 +136,7 @@ function Secondary:BeforeAttack(check_only)
+     local preferred=self.c.brightshade_target
+     if preferred and not require("shadowself/control/plant").Weak(preferred) then self.c.brightshade_target=nil;preferred=nil end
+     if preferred and preferred:IsValid() and self.c.h.ent~=preferred then self.pending=nil;self:Select(preferred);return false end
++    self:Scan()
+     local e=self.pending;self.pending=nil
+     -- 每次攻击都检查侧方真实前摇，不依赖上次走位留下的pending。
+     local danger=self:Danger(self.c.h.ent)
+@@ -142,6 +144,7 @@ function Secondary:BeforeAttack(check_only)
+         if check_only then self.pending=danger else self:Select(danger) end
+         return false
+     end
++    if require("shadowself/control/incoming").ApproachBlocked(self.c,self.enemies,self.c.h.ent) then return false end
+     return true
+ end
+ return Secondary
+diff --git a/scripts/shadowself/native/engine/Dodge.lua b/scripts/shadowself/native/engine/Dodge.lua
+index 04b3be4..2401340 100644
+--- a/scripts/shadowself/native/engine/Dodge.lua
++++ b/scripts/shadowself/native/engine/Dodge.lua
+@@ -83,11 +83,12 @@ do --关于躲避的函数
+ 		if ent == nil or dodgetab == nil then return end
+ 
+ 		HitAndRun.guid = 0
++        HitAndRun.shadowself_dodging=ent
+ 		local locked_ent_pos, locked_player_pos = HitAndRun.pos, HitAndRun.ppos
+ 		ThePlayer:PushEvent("EquipItem", { type = "walk_hands" })
+ 
+ 		while true do
+-            if ThePlayer~=owner or not owner:IsValid() or not owner.components.playercontroller then return end
++            if ThePlayer~=owner or not owner:IsValid() or not owner.components.playercontroller then HitAndRun.shadowself_dodging=nil;return end
+ 			if dodgetab.breakdodgefn and dodgetab.breakdodgefn(ent) then
+ 				reset_idle_ticks()
+ 				break
+@@ -107,7 +108,7 @@ do --关于躲避的函数
+ 
+ 			Sleep(FRAMES)
+ 
+-            if ThePlayer~=owner or not owner:IsValid() or not owner.components.playercontroller then return end
++            if ThePlayer~=owner or not owner:IsValid() or not owner.components.playercontroller then HitAndRun.shadowself_dodging=nil;return end
+ 			local next_dodge = HitAndRun:IsAttackPre(ent, 1, dodgetab)
+ 			if not next_dodge and (not dodgetab.avoid_break or not dodgetab.avoid_break(ent)) then
+ 				break
+@@ -119,6 +120,7 @@ do --关于躲避的函数
+ 			end
+ 		end
+ 
++        HitAndRun.shadowself_dodging=nil
+ 		stop_player_if_moving()
+ 		HitAndRun:CancelDodgingAtk(ent)
+         local follow=HitAndRun.shadowself_after_dodge and HitAndRun.shadowself_after_dodge(ent) or ent
+@@ -140,6 +142,7 @@ do --关于躲避的函数
+ 			start_frame = math.min(ENT_util:FnOrNum(data.atk_frame_calculate, target, data.atk_start_frame,
+ 				stop_frame, nil, data), stop_frame)
+ 		end
++        if HitAndRun.shadowself_latency_frames then start_frame=math.max(0,start_frame-HitAndRun.shadowself_latency_frames()) end
+ 		return start_frame, stop_frame
+ 	end
+ 
+@@ -170,7 +173,7 @@ do --关于躲避的函数
+ 			elseif targetframe >= atk_start_frame and targetframe <=
+ 				atk_stop_frame and targetanim == atkanim then
+ 				--checkatktag
+-				if data.checkatktag and not target:HasTag("attack") then
++				if data.checkatktag and not target:HasTag("attack") and not (target.prefab=="daywalker" and targetanim=="run_pre") then
+ 					return
+ 				end
+ 				if data.breakdodgefn and data.breakdodgefn(target) then
+diff --git a/scripts/shadowself/native/engine/HitAndRun.lua b/scripts/shadowself/native/engine/HitAndRun.lua
+index f5a4aa4..9cc57fc 100644
+--- a/scripts/shadowself/native/engine/HitAndRun.lua
++++ b/scripts/shadowself/native/engine/HitAndRun.lua
+@@ -148,35 +148,46 @@ function HitAndRun:GetClosestTarget()
+ end
+ 
+ do --走向和攻击函数
+-    -- 用当前原版WALKTO动作取消后摇，不再发送缺少预测会话的PredictWalking。
++    -- 完整原版预测移动会话：DoAction在busy时拒绝WALKTO，不能靠它发送躲避。
+     local function doPredictwalk(x,z)
+         local pc=ThePlayer.components.playercontroller
+-        local point=Vector3(x,0,z)
+-        if pc:CanLocomote() then
+-            local action=BufferedAction(pc.inst,nil,ACTIONS.WALKTO,nil,point)
+-            if not pc.ismastersim then
+-                local platform,rx,rz=pc:GetPlatformRelativePosition(x,z)
+-                local function send()
+-                    SendRPCToServer(RPC.LeftClick,ACTIONS.WALKTO.code,rx,rz,nil,true,pc:EncodeControlMods(),nil,nil,platform,platform~=nil)
++        local platform,rx,rz=pc:GetPlatformRelativePosition(x,z)
++        if RPC.PredictWalking then
++            SendRPCToServer(RPC.PredictWalking,rx,rz,false,not HitAndRun.shadowself_predicting,platform,platform~=nil,nil,false)
++            HitAndRun.shadowself_predicting=true
++        end
++        if not pc.IsBusy or not pc:IsBusy() then
++            if pc:CanLocomote() then
++                local action=BufferedAction(pc.inst,nil,ACTIONS.WALKTO,nil,Vector3(x,0,z))
++                if not pc.ismastersim then
++                    local function send() SendRPCToServer(RPC.LeftClick,ACTIONS.WALKTO.code,rx,rz,nil,true,pc:EncodeControlMods(),nil,nil,platform,platform~=nil) end
++                    if pc.locomotor then action.preview_cb=send else action.non_preview_cb=send end
+                 end
+-                if pc.locomotor then action.preview_cb=send else action.non_preview_cb=send end
++                pc:DoAction(action)
++            else
++                SendRPCToServer(RPC.LeftClick,ACTIONS.WALKTO.code,rx,rz,nil,true,pc:EncodeControlMods(),nil,nil,platform,platform~=nil)
+             end
+-            pc:DoAction(action)
+-        else
+-            local platform,rx,rz=pc:GetPlatformRelativePosition(x,z)
+-            SendRPCToServer(RPC.LeftClick,ACTIONS.WALKTO.code,rx,rz,nil,true,pc:EncodeControlMods(),nil,nil,platform,platform~=nil)
++        end
++    end
++    function HitAndRun:StopPredictWalk()
++        if self.shadowself_predicting then
++            if RPC.PredictWalking then SendRPCToServer(RPC.PredictWalking,nil,nil,nil,nil,nil,nil,nil,true) end
++            if RPC.StopWalking then SendRPCToServer(RPC.StopWalking) end
++            self.shadowself_predicting=nil
+         end
+     end
+     function HitAndRun:DoPredictWalk(x,z) return doPredictwalk(x,z) end
+     function HitAndRun:_PredictWalk(point) return doPredictwalk(point.x,point.z) end
+     function HitAndRun:PredictWalk(ppos,mpos,target)
+-        local aim=POS_util:CalculateAimPos(ppos,mpos or target:GetPosition(),0,.35)
++        local aim=POS_util:CalculateAimPos(ppos,target and target:GetPosition() or mpos,target and math.pi or 0,.15)
++        if HitAndRun.shadowself_backstep then aim=HitAndRun.shadowself_backstep(aim,target) end
+         return doPredictwalk(aim.x,aim.z)
+     end
+ 
+ 	--攻击
+ 	function HitAndRun:CloseAndAttack(target, force_force)
+ 		if not target or not ThePlayer then return end
++        HitAndRun:StopPredictWalk()
+ 		local pos = target:GetPosition()
+ 		local noforce = true
+ 		if force_force then
+@@ -228,17 +239,9 @@ do --走向和攻击函数
+ 			end
+ 		end
+ 		local x, z = fx, fz
+-		local ActiveItem = ThePlayer.replica.inventory:GetActiveItem()
+-		local playercontroller = ThePlayer.components.playercontroller
+-		if playercontroller:CanLocomote() then
+-			local action = BufferedAction(playercontroller.inst, nil, ACTIONS.WALKTO, nil,
+-				Vector3(x, 0, z))
+-			playercontroller:DoAction(action)
+-		else
+-			local platform, pos_x, pos_z = playercontroller:GetPlatformRelativePosition(x, z)
+-			SendRPCToServer(RPC.LeftClick, ACTIONS.WALKTO.code, pos_x, pos_z, ActiveItem, nil, nil,
+-				nil, nil, platform, platform ~= nil)
+-		end
++        local point=Vector3(x,0,z)
++        if HitAndRun.shadowself_backstep then point=HitAndRun.shadowself_backstep(point,rangecheck_ent or HitAndRun.ent) end
++        return doPredictwalk(point.x,point.z)
+ 	end
+ 
+ 	function HitAndRun:PredictWalkTo(startpos, stoppos, walkdistance, checkrange, rangecheck_ent, trydodging)
+@@ -258,7 +261,9 @@ do --走向和攻击函数
+ 			end
+ 		end
+ 		local x, z = fx, fz
+-		HitAndRun:_PredictWalk(Vector3(x, 0, z))
++		local point=Vector3(x,0,z)
++        if HitAndRun.shadowself_backstep then point=HitAndRun.shadowself_backstep(point,rangecheck_ent or HitAndRun.ent) end
++        HitAndRun:_PredictWalk(point)
+ 	end
+ end
+ do --功能性函数
+@@ -789,6 +794,7 @@ end
+ 
+ --停止线程
+ function HitAndRun:StopHitAndRun()
++    HitAndRun:StopPredictWalk();HitAndRun.shadowself_dodging=nil
+ 	if GAME_util:InGame() and TUNING.Cheatthread then
+ 		--ThePlayer:EnableMovementPrediction(true)
+ 		KillThreadsWithID(TUNING.Cheatthread.id) --挂起线程 让线程不动
+diff --git a/scripts/shadowself/native/utils/POS_util.lua b/scripts/shadowself/native/utils/POS_util.lua
+index db04aeb..19aea35 100644
+--- a/scripts/shadowself/native/utils/POS_util.lua
++++ b/scripts/shadowself/native/utils/POS_util.lua
+@@ -40,6 +40,7 @@ function POS_util:CalculateDirect(pos1, pos2)
+ end
+ 
+ function POS_util:GoToPoint(x, z)
++    if HitAndRun and HitAndRun.DoPredictWalk then return HitAndRun:DoPredictWalk(x,z) end
+ 	local ActiveItem = ThePlayer.replica.inventory:GetActiveItem()
+ 	local playercontroller = ThePlayer.components.playercontroller
+ 	if playercontroller:CanLocomote() then
+diff --git a/tests/combat103.lua b/tests/combat103.lua
+index 58cfb06..34f3f99 100644
+--- a/tests/combat103.lua
++++ b/tests/combat103.lua
+@@ -56,7 +56,7 @@ local qattack=require("shadowself/control/queenattack")
+ local qdata=qattack(c,queen,false)
+ assert(qdata.point=="target" and qdata.angle==0 and qdata.dist>=6.75,"queen retreat exits native six-unit targeted hit range")
+ frame=13;assert(qattack(c,queen,false)==qdata,"one native dodge table until hit frame")
+-frame=14;assert(qattack(c,queen,false)==false,"queen recovery returns to native attack without waiting for the whole animation")
++frame=14;assert(qattack(c,queen,false),"network margin holds through replicated impact frame");frame=14+require("shadowself/control/nettiming").Frames(c);assert(not qattack(c,queen,false),"release after impact margin rather than whole animation")
+ -- Interrupted equip acknowledgements cannot stall after the native hit state.
+ local state="hit";p.AnimState={IsCurrentAnimation=function(_,a) return state==a end}
+ c.gear={pending={untiltime=now+1.2},next_request=100};c.next_move=100;c.last_action_kind="attack";c.attack_until=100
+diff --git a/tests/combat115.lua b/tests/combat115.lua
+index 1f72229..793d9f3 100644
+--- a/tests/combat115.lua
++++ b/tests/combat115.lua
+@@ -76,7 +76,7 @@ local vine=entity("lunarthrall_plant_vine_end",6,0);vine.tags.lunarthrall_plant_
+ local mode,picked=b:Tick(head);assert(mode=="attack" and picked==vine)
+ head.tags.retaliates=nil;head.anim="tired_loop_large";mode,picked=b:Tick(vine);assert(picked==head)
+ -- Bomb starts earlier, with time to clear the cloud; actual cloud remains a path obstacle.
+-local bomb=entity("sporebomb");bomb.components.timer={GetTimeLeft=function() return 1.2 end}
++local bomb=entity("sporebomb");bomb.components.timer={GetTimeLeft=function() return 1.6 end}
+ assert(#b:Zones({bomb})==0);bomb.components.timer.GetTimeLeft=function() return .4 end
+ assert(#b:Zones({bomb})==1)
+ local cloud=entity("sporecloud");cloud.tags.sporecloud=true
+diff --git a/tests/combat116.lua b/tests/combat116.lua
+index 3068cc0..517c29c 100644
+--- a/tests/combat116.lua
++++ b/tests/combat116.lua
+@@ -34,10 +34,10 @@ c.Latency=function() return .1 end;c.Speed=function() return 6 end
+ -- A single circular-direction sidestep ends; a blocked arc reverses direction.
+ local ant=entity("antlion");ant.anim="cast_pre";c.enemies={ant};c.h.ent=ant;p.pos=Vector3(3,0,0)
+ local data=b:Dodge(ant,false);assert(data.exclusive and data.noattack)
+-local step=data:fn();assert(math.abs(math.sqrt(step:DistSq(ant.pos))-3)<.001);p.pos=step
++local step=data:fn();assert(step.x>=3 and step:DistSq(p.pos)<=2.25^2,"short tangent cannot chord through boss body");p.pos=step
+ assert(not b:Dodge(ant,false),"one safe sidestep ends the dodge and permits damage")
+ p.pos=Vector3(3,0,0);b.routes.sides[ant]=1;c.hazards={{pos=Vector3(3*math.cos(.5),0,3*math.sin(.5)),radius=1.2}}
+-b.routes.antlion=nil;data=b:Dodge(ant,false);local q=data:fn();assert(q.z<0 and math.abs(math.sqrt(q:DistSq(ant.pos))-3)<.001)
++b.routes.antlion=nil;data=b:Dodge(ant,false);local q=data:fn();assert(q.z<0 and q.x>=3 and q:DistSq(p.pos)<=2.25^2)
+ c.hazards={}
+ local pig=entity("daywalker");pig.anim="run_loop";local original={dist=8};assert(b:Dodge(pig,original)==original,"daywalker passes native table through unchanged")
+ pig.anim="atk3";local old={dist=5};assert(b:Dodge(pig,old)==old,"pounce uses native table without custom lateral override")
+diff --git a/tests/combat118.lua b/tests/combat118.lua
+index 477274d..01e61a0 100644
+--- a/tests/combat118.lua
++++ b/tests/combat118.lua
+@@ -112,7 +112,7 @@ b.moon_hold=nil
+ for _,name in ipairs({"warg","claywarg","gingerbreadwarg","mutatedwarg"}) do
+  local wolf=entity(name);wolf.anim="atk";wolf.frame=10
+  assert(b:Dodge(wolf,false).noattack,name.." bite dodge")
+- wolf.frame=12;assert(not b:Dodge(wolf,false),name.." recovery output")
++ wolf.frame=12+require("shadowself/control/nettiming").Frames(c);assert(not b:Dodge(wolf,false),name.." recovery after replication margin")
+ end
+ package.loaded["shadowself/control/actions"]=savedA;require("shadowself/native").context=savedN
+ print("PASS: bare eye vs arm regrowth, fume event/child fallback and real bomb movement ticks, exclusive queen gear owner, ten-guard long straight pull, antlion clear-side/backtracking, continuous weak-head output, bishop circle exit, fixed lunar lane and four warg variants")
+diff --git a/tests/combat120.lua b/tests/combat120.lua
+index 0a98839..d6e2bed 100644
+--- a/tests/combat120.lua
++++ b/tests/combat120.lua
+@@ -44,7 +44,8 @@ local task=env.StartThread(function()
+ end,"test_native")
+ bridge.thread=task;tune.Cheatthread=task;local co=task.co
+ local ok,why=coroutine.resume(co);assert(ok,why);assert(env.scheduler.tasks[co] and bridge.pause_requested)
+-bridge:PauseAttack();assert(stopped==1 and not bridge.thread and not env.scheduler.tasks[co],"supervisor removes sleeping attack task safely")
++local replayed=0;bridge.coordinator={blocked=true,last_point=Vector3(4,0,2)};local oldPos=POS_util;POS_util={GoToPoint=function(_,x,z) assert(x==4 and z==2);replayed=replayed+1 end}
++bridge:PauseAttack();assert(stopped==1 and not bridge.thread and not env.scheduler.tasks[co],"supervisor removes sleeping attack task safely");assert(replayed==1 and bridge.coordinator.next_move>GetTime(),"deferred stop replays external escape before movement throttle");POS_util=oldPos
+ -- Weak-head refresh inside native coroutine is pure selection, never a movement/stop call.
+ local head=entity("lunarthrall_plant");head.tags.lunarthrall_plant=true;head.anim="tired_loop_large"
+ c.enemies={head};c.h.ent=head;c.brightshade_target=head;c.bridge.supervisor={};c.bridge.wrappers={PreTheLoop={old=function() end}}
+diff --git a/tests/combat121.lua b/tests/combat121.lua
+index 4ad3f6c..9ed4468 100644
+--- a/tests/combat121.lua
++++ b/tests/combat121.lua
+@@ -86,6 +86,23 @@ for _,name in ipairs({"land","grow1","grow2"}) do bomb.anim=name;bomb.frame=80;n
+ bomb.anim="explode_pre";bomb.frame=0;now=now+.2;assert(coroutine.resume(routines[bridge.supervisor]));assert(stops==0,"early explode_pre has not reached earliest random fuse")
+ bomb.frame=45;now=now+.2;assert(coroutine.resume(routines[bridge.supervisor]));assert(stops==1 and not bridge:OwnsThread(),"near earliest explosion suspends attacks to escape")
+ bomb.anim="explode";now=now+.2;assert(coroutine.resume(routines[bridge.supervisor]));assert(starts==2 and bridge:OwnsThread(),"finished explosion immediately permits attacking toad again")
++-- 追击主目标的DoDodge必须在原线程，监督协程不能被整段躲避阻塞。
++c.bosses=nil;c.encounters=nil;c.supplies=nil;c.crabking={Tick=function() end};toad.pos=Vector3(10,0,0)
++local dodge_calls,checks,updates=0,0,0;local side=false
++h.IsAttackPre=function() return {atkanim="atk"} end
++h.DoDodge=function() dodge_calls=dodge_calls+1;coroutine.yield("supervisor_blocked") end
++c.travel.UpdateDodge=function() updates=updates+1 end
++c.mechanisms={c=c,Tick=function(self)
++ checks=checks+1
++ if side then return require("shadowself/control/mechanisms").Incoming(self) end
++ return false
++end}
++bridge:PauseAttack();local before_start=starts;now=now+.2
++local ok,reason=coroutine.resume(routines[bridge.supervisor]);assert(ok and reason~="supervisor_blocked" and dodge_calls==0 and starts==before_start+1 and bridge:OwnsThread(),"pursuit yields to native thread without blocking supervisor")
++h.shadowself_dodging=toad;local before_stop=stops;now=now+.04
++assert(coroutine.resume(routines[bridge.supervisor]));assert(stops==before_stop and updates==1,"long-distance active native dodge is not killed by pursuit/gear branch")
++local rook=entity("rook",-7,0);rook.anim="atk_pre";rook.frame=15;c.enemies={toad,rook};side=true;c.moved=nil;now=now+.04
++assert(coroutine.resume(routines[bridge.supervisor]));assert(checks>=3 and c.moved and math.abs(c.moved.z)>2 and not bridge:OwnsThread(),"actual off-target charge preempts an in-flight primary dodge on the next supervisor frame")
+ bridge.supervisor=nil;pc.DoAction=bridge.action_old
+ StartThread=oldStart;Sleep=oldSleep;KillThreadsWithID=oldKill;IsSimPaused=oldPaused
+ package.loaded["shadowself/control/actions"]=savedA;require("shadowself/native").context=savedN
+diff --git a/tests/combat128.lua b/tests/combat128.lua
+index 99a2fe8..52b393a 100644
+--- a/tests/combat128.lua
++++ b/tests/combat128.lua
+@@ -118,6 +118,9 @@ assert(bridge.allowed(rook) and h:GetClosestTarget()==knight,"actual target pick
+ local before=hits;h:OnKeyFrame();h:CloseAndAttack(rook);h:ShouldAtkWhenDodging(rook)
+ assert(hits==before,"actual keyframe/close/captured dodge followup cannot hit rook while another target remains")
+ h.selected_ents={[rook]=true};assert(h:GetClosestTarget()==rook);h:OnKeyFrame();assert(hits==before,"last rook still waits for observed charge recovery");c.bosses.rooks[rook]={ready=true};h:OnKeyFrame();assert(hits==before+1,"observed charge recovery permits native attacks")
++bridge:PauseAttack();c.special_active=false;c.blocked=true;before=hits
++h:OnKeyFrame();h:CloseAndAttack(rook);assert(hits==before,"delayed old attack callback cannot steal movement while mechanism owns the paused thread")
++c.blocked=false
+ local spike=entity("sandspike_tall",2,0);bridge.priority_target=spike;assert(not bridge.allowed(spike),"sand spike rejected before priority and explicit command overrides")
+ -- 帝王蟹过滤也必须先于priority/resume/显式指令，不让原线程误补刀小蟹。
+ local king=entity("crabking",0,0);local wall=entity("crabking_icewall",2,0);local crabmob=entity("crabking_mob",3,0)
+diff --git a/tests/control.lua b/tests/control.lua
+index d0c848a..19491ed 100644
+--- a/tests/control.lua
++++ b/tests/control.lua
+@@ -116,7 +116,7 @@ local client={replica={combat={IsAlly=function() return false end}}}
+ enemy.replica={combat={GetTarget=function() return client end}}
+ local b=Bridge(client)
+ assert(b:Start({kind="fight",target=""},function() return true end))
+-assert(started==1 and HitAndRun.dodgetest==true and m_options.hitandrun_walkway==4)
++assert(started==1 and HitAndRun.dodgetest==true and m_options.hitandrun_walkway==true)
+ HitAndRun:GetAttackTargets(20)
+ assert(HitAndRun.selected_ents[enemy] and not HitAndRun.selected_ents[neutral] and not HitAndRun.selected_ents[other],"default combat filters neutral and players")
+ neutral.replica={combat={GetTarget=function() end}}
+diff --git a/tests/native_embedded.lua b/tests/native_embedded.lua
+index 2b047f1..48a0397 100644
+--- a/tests/native_embedded.lua
++++ b/tests/native_embedded.lua
+@@ -68,6 +68,12 @@ for _,entry in pairs(n.HitAndRun.targetanimtable.daywalker) do
+  assert(entry.atk_start_frame==v[1] and entry.atk_stop_frame==v[2] and entry.dist==v[3] and entry.update==v[4] and math.abs(entry.angle-v[5]*math.pi/180)<.001,"daywalker uses original 3014 animation/frame/angle/range")
+ end
+ assert(pig_count==5)
++local oldanim=n.ENT_util.GetAnimation;n.ENT_util.GetAnimation=function(_,e) return e.anim end
++local pig={prefab="daywalker",anim="run_pre",HasTag=function() return false end,AnimState={GetCurrentAnimationFrame=function() return 0 end}}
++assert(n.HitAndRun:IsAttackPre(pig),"visible pounce windup must not wait for delayed replicated attack tag")
++n.HitAndRun.shadowself_latency_frames=function() return 5 end;pig.anim="atk_slam_pre";pig.AnimState.GetCurrentAnimationFrame=function() return 5 end
++assert(n.HitAndRun:IsAttackPre(pig),"native frame10 prep starts five observed frames earlier under network budget")
++n.HitAndRun.shadowself_latency_frames=nil;n.ENT_util.GetAnimation=oldanim
+ for _,entry in pairs(n.HitAndRun.targetanimtable.alterguardian_phase2) do
+  if entry.atkanim=="attk_chop" then assert(entry.dist==nil,"native 40-unit summon retreat removed") end
+ end
+diff --git a/tests/network_combat.lua b/tests/network_combat.lua
+new file mode 100644
+index 0000000..bb26500
+--- /dev/null
++++ b/tests/network_combat.lua
+@@ -0,0 +1,67 @@
++-- 延迟50/80/100ms、普通6移速/手杖7.5，不模拟道路或魔光加速。
++local saved={time=GetTime,world=TheWorld,net=TheNet,sim=TheSim};local now=0;GetTime=function() return now end
++Vector3=function(x,y,z) local p={x=x,y=y,z=z};function p:DistSq(q) return (self.x-q.x)^2+(self.z-q.z)^2 end;return p end
++local uid=0
++local function ent(n,x,z,radius)
++ uid=uid+1;local e={prefab=n,GUID=uid,pos=Vector3(x or 0,0,z or 0),anim="idle",frame=0,rotation=0,replica={},components={},radius=radius or .5}
++ function e:GetPosition() return self.pos end;function e:GetPhysicsRadius() return self.radius end;function e:IsValid() return true end;function e:HasTag() return false end
++ e.AnimState={IsCurrentAnimation=function(_,n) return e.anim==n end,GetCurrentAnimationFrame=function() return e.frame end,GetCurrentAnimationLength=function() return 4 end}
++ e.Transform={GetRotation=function() return e.rotation end};return e
++end
++local p=ent("wilson",3.5,0);local ping=80;TheWorld={ismastersim=false,state={}};TheNet={GetPing=function() return ping end};TheSim={FindEntities=function() return {} end}
++local c={player=p,enemies={},observed={},hazards={},gear={AttackRange=function() return 2 end},snapshot={},h={},bridge={PauseAttack=function() end},travel={BeginDodge=function() end},actions={SafePoint=function() return true end}}
++function c:Latency() return ping/1000+.1 end;function c:Speed() return 6 end;function c:Move(q) self.moved=q end
++local W=require("shadowself/control/attackwindow")
++for _,ms in ipairs({50,80,100}) do
++ ping=ms;now=0;c.attack_windows=nil;local queen=ent("beequeen",0,0,1.5);queen.anim="atk";queen.frame=0
++ assert(W.Blocked(c,queen),"no greed during windup")
++ p.pos=Vector3(7,0,0);now=.6;queen.frame=18
++ assert(not W.Blocked(c,queen),"early cooldown permits approach + ONE impact + retreat using speed6, ping="..ms)
++ p.pos=Vector3(3.5,0,0);now=1.4;queen.anim="idle"
++ assert(W.Blocked(c,queen) and W.Tick(c,queen) and c.moved:DistSq(queen.pos)>=6.8^2,"do not commit another strike when retreat budget is exhausted")
++ p.pos=c.moved;now=2.1;W.Tick(c,queen)
++ assert(c.moved:DistSq(queen.pos)<5^2,"expired cooldown must rebait, not flee forever")
++ p.pos=c.moved;now=2.15;W.Tick(c,queen);assert(c.moved:DistSq(queen.pos)>6.8^2,"bait contact immediately requests retreat without waiting for replicated attack")
++ queen.anim="atk";queen.frame=0;now=2.2;W.Observe(c,queen)
++ assert(c.attack_windows[queen].start>2,"new attack resets observed deadline")
++end
++local asleep=ent("beequeen");asleep.anim="sleep_loop";now=20
++assert(not W.Blocked(c,asleep) and not W.Tick(c,asleep),"sleeping queen remains an immediate damage window, never a rebait loop")
++local boss={c=c};local routes=require("shadowself/control/routes")(boss)
++local ant=ent("antlion",0,0,4);p.pos=Vector3(4.6,0,0);ant.anim="cast_pre";ant.frame=5;c.attack_windows=nil
++local data=routes:Dodge(ant,false);local q=data:fn()
++assert(q.z<0 and q:DistSq(p.pos)>=1.7^2 and q:DistSq(p.pos)<=2.25^2,"body-touching ant gets short tangent, not rejected circular chord")
++p.pos=q;assert(not routes:Dodge(ant,false));ant.anim="cast_pst";assert(not routes:Dodge(ant,false))
++ant.anim="cast_pre";ant.frame=5;data=routes:Dodge(ant,false);assert(data and data:fn():DistSq(p.pos)>1,"every real cast resets even when same frame is first observed")
++c.actions.SafePoint=function() return false end;routes.antlion=nil;data=routes:Dodge(ant,false);assert(data and routes:Dodge(ant,false) and not routes.antlion.done,"no route must not mark this and future casts as completed")
++c.actions.SafePoint=function() return true end
++-- 侧方预备阶段已经抢占，不等冲刺本体碰到近身圆。
++local Incoming=require("shadowself/control/incoming");local primary=ent("bishop",5,0);local rook=ent("rook",-7,0);rook.anim="atk_pre";rook.frame=10
++c.h.ent=primary;p.pos=Vector3(0,0,0);local point=Incoming.Point(c,{primary,rook});assert(point and math.abs(point.z)>2,"side charge preempts another target's attack/dodge before charge starts")
++p.pos=Vector3(0,0,3);local walking_target=ent("hound",0,-4)
++assert(Incoming.Risk(Incoming.Lane(c,rook),p.pos)==0 and Incoming.ApproachBlocked(c,{rook},walking_target),"currently outside lane cannot start walking into it to attack A")
++-- 熊獾坑：真实源码半径3，单怪走位也绕开；Boss在坑里不攻击，先引出。
++local B=require("shadowself/control/bosses");local b=B(c);local hole=ent("bearger_sinkhole");local bear=ent("mutatedbearger");p.pos=Vector3(6,0,0)
++local zones=b:Zones({hole});assert(zones[1].bearger_pit and zones[1].radius>=3.8)
++c.hazards=zones;assert(b:AttackBlocked(bear));local mode=b:Bearger(bear);assert(mode=="move" and c.moved:DistSq(hole.pos)>10^2)
++bear.pos=Vector3(9,0,0);assert(not b:Bearger(bear) and not b:AttackBlocked(bear));c.hazards={}
++-- 单怪原生路线也必须使用坑洞禁区，而非仅群怪时才检查。
++c.hazards=zones;bear.pos=Vector3(5,0,0);p.pos=Vector3(6,0,0)
++c.bridge.allowed=function() return true end;c.bridge.wrappers={IsAttackPre={old=function() return false end},PreTheLoop={old=function() end}}
++local sec=require("shadowself/control/secondary")(c)
++local native={atkanim="atk",dist=3,fn=function() return Vector3(2,0,0) end}
++local wrapped=sec:Wrap(bear,native);assert(wrapped~=native)
++local safe=wrapped:fn();assert(safe:DistSq(hole.pos)>=zones[1].radius^2,"solo bear sidestep cannot enter its slow pit")
++c.hazards={}
++local oldN=require("shadowself/native").context;require("shadowself/native").context={ENT_util={GetAnimation=function(_,e) return e.anim end}}
++local crystal=ent("mutateddeerclops");crystal.anim="throw";crystal.frame=30;p.pos=Vector3(8,0,0);b:Crystal(crystal)
++assert(c.moved.x>=8-.001 and math.abs(c.moved.z)>5,"first ice spike never approaches boss; lateral or away only")
++-- 附身炸弹更早动；未临爆的地面蘑菇依旧允许输出。
++local bomb=ent("sporebomb");bomb._shadowself_bomb_owner=p;bomb.components.timer={GetTimeLeft=function() return 1.1 end}
++assert(#b:Zones({bomb})==1 and b.bomb_imminent==bomb)
++bomb.components.timer.GetTimeLeft=function() return 1.8 end;assert(#b:Zones({bomb})==0)
++local mushroom=ent("mushroombomb");mushroom.anim="explode_pre";mushroom.frame=0;p.pos=Vector3(0,0,0)
++assert(#b:Zones({mushroom})==0);mushroom.frame=30;assert(#b:Zones({mushroom})==1,"leave early enough to exit before earliest random explosion")
++require("shadowself/native").context=oldN
++GetTime,TheWorld,TheNet,TheSim=saved.time,saved.world,saved.net,saved.sim
++print("PASS: 50/80/100ms at speed6 queen one-hit/exit/rebait/new-cycle budget; true ant cast reset/body-safe tangent/blocked retry; side pre-charge; bear pit lure; first crystal lateral; earlier distinct bomb timing")
+diff --git a/tests/network_movement.lua b/tests/network_movement.lua
+new file mode 100644
+index 0000000..5644f75
+--- /dev/null
++++ b/tests/network_movement.lua
+@@ -0,0 +1,30 @@
++-- 联机实际移动入口回归：原版DoAction busy拒绝之前必须发出合法预测会话。
++local oldPlayer,oldRPC,oldActions,oldBuffered=ThePlayer,RPC,ACTIONS,BufferedAction
++local calls={};local busy=true;local attempted=0;local platform={}
++local pc={ismastersim=false,locomotor={}}
++function pc:CanLocomote() return true end;function pc:IsBusy() return busy end
++function pc:GetPlatformRelativePosition(x,z) return platform,x-10,z-20 end
++function pc:EncodeControlMods() return 0 end
++function pc:DoAction(act) attempted=attempted+1;if self:IsBusy() then return end;if act.preview_cb then act.preview_cb() end end
++ThePlayer={components={playercontroller=pc},GetPosition=function() return Vector3(0,0,0) end}
++RPC={PredictWalking=101,StopWalking=102,LeftClick=103};ACTIONS={WALKTO={code=1},ATTACK={code=2}}
++BufferedAction=function() return {} end
++local H={};local pos={CalculateAimPos=function(_,a,b,angle,d) return Vector3(a.x+math.cos(angle)*d,0,a.z+math.sin(angle)*d) end}
++local env=setmetatable({HitAndRun=H,POS_util=pos,ThePlayer=ThePlayer,RPC=RPC,ACTIONS=ACTIONS,BufferedAction=BufferedAction,SendRPCToServer=function(...) calls[#calls+1]={...} end},{__index=_G})
++local src=assert(io.open("scripts/shadowself/native/engine/HitAndRun.lua","r")):read("*a")
++local a=assert(src:find("do --走向和攻击函数",1,true));local z=assert(src:find("\ndo --功能性函数",a,true))
++local f=assert(loadstring(src:sub(a,z-1)));setfenv(f,env);f()
++local F=assert(loadfile("scripts/shadowself/native/utils/POS_util.lua"));setfenv(F,env);local P=F()
++P:GoToPoint(12,24)
++assert(attempted==0 and #calls==1,"busy attack cannot swallow the move before it reaches the server")
++local msg=calls[1];assert(msg[1]==101 and msg[2]==2 and msg[3]==4 and msg[4]==false and msg[5]==true and msg[6]==platform and msg[7]==true,"correct platform-relative PredictWalking with isstart=true")
++H:StopPredictWalk();assert(calls[2][1]==101 and calls[2][9]==true and calls[3][1]==102 and not H.shadowself_predicting,"prediction is explicitly stopped before attacks/cleanup")
++busy=false;H:WalkTo(Vector3(0,0,0),Vector3(1,0,0),-.3)
++assert(attempted==1 and calls[4][1]==101 and calls[4][2]<-10 and calls[5][1]==103,"post-hit backstep uses same real RPC path")
++H:PredictWalk(Vector3(0,0,0),Vector3(1,0,0),{GetPosition=function() return Vector3(1,0,0) end})
++assert(calls[#calls-1][5]==false,"continuing movement must not restart prediction timer every frame")
++assert(calls[#calls-1][2]<-10,"range-limit fallback must not move toward boss/mouse")
++local actual=read_source("components/playercontroller.lua")
++assert(actual:find('elseif self:IsBusy() then',1,true) and actual:find('if isstart then',1,true) and actual:find('RestartPredictMoveTimer()',1,true))
++ThePlayer,RPC,ACTIONS,BufferedAction=oldPlayer,oldRPC,oldActions,oldBuffered
++print("PASS: real native DoDodge POS entry and WalkTo share valid prediction session despite busy; platform coordinates; stopped prediction; outward backstep fallback; installed controller source guards")
+diff --git a/tools/verify51.py b/tools/verify51.py
+index ea90c36..3ddfb40 100644
+--- a/tools/verify51.py
++++ b/tools/verify51.py
+@@ -16,7 +16,7 @@ with zipfile.ZipFile(Path("D:/Steam/steamapps/common/Don't Starve Together/data/
+     runtime.globals().write_debug_fixture=lambda text:(ROOT/'reviews/queen-debug-offline-fixture.log').write_text(text,encoding='utf8')
+     runtime.globals().read_source=lambda path:archive.read('scripts/'+path).decode('utf8')
+     runtime.globals().read_3014_dodge=lambda:(ROOT/'scripts/shadowself/native/engine/Dodge.lua').read_text(encoding='utf8')
+-    suites=['offline','render_lifecycle','conversation','daily','speech','voice','control','actions_clock','merge','native_merge','coordinator','maxwell','personality','thought_cooking','batch_cooking','navigation','fishing_queen','battlemusic','secondary_travel','dodge_cane','combat103','native_food','grinding','chat_ui','knowledge','combat112','combat114','combat115','combat116','combat117','combat118','combat119','combat120','combat121','combat122','combat123','combat124','combat125','combat126','combat128','queen_debug_removed','queen_flute_recovery','queen_phase1','queen_phase3','server_combat','boss140','boss141','boss142','native_embedded']
++    suites=['offline','render_lifecycle','conversation','daily','speech','voice','control','actions_clock','merge','native_merge','coordinator','maxwell','personality','thought_cooking','batch_cooking','navigation','fishing_queen','battlemusic','secondary_travel','dodge_cane','combat103','native_food','grinding','chat_ui','knowledge','combat112','combat114','combat115','combat116','combat117','combat118','combat119','combat120','combat121','combat122','combat123','combat124','combat125','combat126','combat128','queen_debug_removed','queen_flute_recovery','queen_phase1','queen_phase3','server_combat','boss140','boss141','boss142','network_movement','network_combat','native_embedded']
+     for name in (sys.argv[2].split(',') if len(sys.argv)>2 else suites):
+         runtime.execute((ROOT/'tests'/f'{name}.lua').read_text(encoding='utf8'))
+ print('PASS: Lua 5.1 regression complete; gameplay remains untested')

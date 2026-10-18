@@ -74,6 +74,9 @@ function Boss:AttackBlocked(e)
  if self.c.brightshade_target and e~=self.c.brightshade_target then return true end
  if not e then return false end
  if (e.prefab=="rook" or e.prefab=="rook_nightmare") and (anim(e,"atk") or not (self.rooks[e] and self.rooks[e].ready)) then return true end
+ if e.prefab=="mutatedbearger" then
+  for _,zone in ipairs(self.c.hazards or {}) do if zone.bearger_pit and e:GetPosition():DistSq(zone.pos)<zone.radius^2 then return true end end
+ end
  if e.prefab=="minotaur" and self.guardian and self.guardian.target==e and self.guardian.active and not require("shadowself/control/guardian").Stunned(e) and not self.routes:Leap(e) then return true end
  if e.prefab=="rabbitking_aggressive" and (anim(e,"dropkick_pre") or anim(e,"dropkick_loop") or anim(e,"spawn_pre") or anim(e,"spawn_loop") or anim(e,"despawn") and frame(e)>=47) then return true end
  return e:HasTag("lunarthrall_plant") and waking(e) or (e.prefab=="slurtle" or e.prefab=="snurtle") and (e:HasTag("shell") or anim(e,"hide") or anim(e,"hide_loop") or anim(e,"emerge"))
@@ -215,12 +218,14 @@ function Boss:Crystal(target)
      local t=len>0 and math.max(0,math.min(1,((q.x-p.x)*dx+(q.z-p.z)*dz)/len)) or 0
      local closest=Vector3(p.x+dx*t,0,p.z+dz*t)
      if closest:DistSq(q)>=body*body and Nav.Safe(c,v,target) then
-      local value=second and v:DistSq(q) or math.abs(math.cos(a-theta))*30+p:DistSq(v)*.05
+      -- 第一发严格横向，不选择朝Boss走；第二发才选择靠近点燃。
+      local toward=(v.x-p.x)*(q.x-p.x)+(v.z-p.z)*(q.z-p.z)
+      local value=second and v:DistSq(q) or math.abs(math.cos(a-theta))*30+p:DistSq(v)*.05+(toward>0 and 10000 or 0)
       value=value+Nav.Risk(c,v,target)*100
       if not score or value<score then best,score=v,value end
      end
     end
-    s.escape=best or Nav.Select(c,Vector3(mark.x+math.cos(theta)*6.8,0,mark.z+math.sin(theta)*6.8),target)
+    s.escape=best or Nav.Select(c,Vector3(mark.x+math.cos(theta+(second and 0 or math.pi/2))*6.8,0,mark.z+math.sin(theta+(second and 0 or math.pi/2))*6.8),target)
    end
    return self:Move(s.escape,second and "晶鹿 · 躲开第二发同时准备点燃" or "晶鹿 · 横移离开冰锥完整范围",target)
   end
@@ -283,7 +288,8 @@ function Boss:Zones(entities)
  local function add(e,r,pos) zones[#zones+1]={pos=pos or e:GetPosition(),radius=r,source=e} end
  for _,e in ipairs(entities) do if live(e) then
   seen[e]=true;local n=e.prefab;local ep=e:GetPosition()
-  if n=="sporecloud" and e:HasTag("sporecloud") then add(e,(TUNING.TOADSTOOL_SPORECLOUD_RADIUS or 3.5)+.8)
+  if n=="bearger_sinkhole" and not anim(e,"disappear") then add(e,(TUNING.MUTATED_BEARGER_SINKHOLERADIUS or 3)+c.player:GetPhysicsRadius(0)+.35);zones[#zones].bearger_pit=true
+  elseif n=="sporecloud" and e:HasTag("sporecloud") then add(e,(TUNING.TOADSTOOL_SPORECLOUD_RADIUS or 3.5)+.8)
   elseif n=="mushroombomb" or n=="mushroombomb_dark" then
    local late=false
    if anim(e,"explode_pre") then
@@ -291,7 +297,7 @@ function Boss:Zones(entities)
     local earliest=length*.5-frame(e)*FRAMES
     local radius=(TUNING.TOADSTOOL_MUSHROOMBOMB_RADIUS or 3.5)+.5
     local exit=math.max(0,radius-math.sqrt(p:DistSq(ep)))/(c.Speed and math.max(1,c:Speed()) or 6)
-    late=earliest<=exit+.15+(c.Latency and c:Latency() or .1)
+    late=earliest<=exit+.3+require("shadowself/control/nettiming").Delay(c)
    end
    if late then add(e,(TUNING.TOADSTOOL_MUSHROOMBOMB_RADIUS or 3.5)+.5) end
   elseif n=="sporebomb" then
@@ -301,7 +307,7 @@ function Boss:Zones(entities)
    local latency=c.Latency and c:Latency() or .1
    local lead=math.max(24*FRAMES,5/(c.Speed and math.max(1,c:Speed()) or 6)+latency+.15)
    local par=e._shadowself_bomb_owner or e.entity and e.entity:GetParent()
-   if remaining<= (par==c.player and math.min(1,.55+latency) or lead) then
+   if remaining<= (par==c.player and math.max(1,5/(c.Speed and math.max(1,c:Speed()) or 6)+latency+.25) or lead+.15) then
     local center=par and par.GetPosition and par:GetPosition() or ep
     if par==c.player or par==c.player.entity then
      center=p;self.bomb_imminent=e
@@ -420,8 +426,20 @@ function Boss:Rabbit(target)
   self.c.bridge:PauseAttack();return "support",target
  end
 end
+function Boss:Bearger(target)
+ if target.prefab~="mutatedbearger" then return end
+ local c=self.c;local p=c.player:GetPosition();local qp=target:GetPosition()
+ for _,zone in ipairs(c.hazards or {}) do if zone.bearger_pit and qp:DistSq(zone.pos)<zone.radius^2 then
+  local dx,dz=p.x-zone.pos.x,p.z-zone.pos.z;local d=math.sqrt(dx*dx+dz*dz)
+  if d<.01 then dx,dz,d=1,0,1 end
+  local goal=Vector3(zone.pos.x+dx/d*(zone.radius+7),0,zone.pos.z+dz/d*(zone.radius+7))
+  return self:Move(goal,"装甲熊獾 · 避开减速坑，先把Boss引出来",target)
+ end end
+end
 function Boss:Tick(target)
  local c=self.c;local p=c.player:GetPosition()
+ if (target.prefab=="dragonfly" or target.prefab=="warg" or target.prefab=="mutatedwarg" or target.prefab=="claywarg" or target.prefab=="gingerbreadwarg") and require("shadowself/control/attackwindow").Tick(c,target) then return "move",target end
+ local bear_mode,bear_target=self:Bearger(target);if bear_mode then return bear_mode,bear_target end
  local guardian_mode,guardian_target=require("shadowself/control/guardian").Tick(self,target)
  if guardian_mode then return guardian_mode,guardian_target end
  if self.c.brightshade_target or target:HasTag("lunarthrall_plant") or target:HasTag("lunarthrall_plant_end") or Plant.Middle(target) then

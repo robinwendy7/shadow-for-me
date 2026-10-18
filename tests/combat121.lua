@@ -86,6 +86,23 @@ for _,name in ipairs({"land","grow1","grow2"}) do bomb.anim=name;bomb.frame=80;n
 bomb.anim="explode_pre";bomb.frame=0;now=now+.2;assert(coroutine.resume(routines[bridge.supervisor]));assert(stops==0,"early explode_pre has not reached earliest random fuse")
 bomb.frame=45;now=now+.2;assert(coroutine.resume(routines[bridge.supervisor]));assert(stops==1 and not bridge:OwnsThread(),"near earliest explosion suspends attacks to escape")
 bomb.anim="explode";now=now+.2;assert(coroutine.resume(routines[bridge.supervisor]));assert(starts==2 and bridge:OwnsThread(),"finished explosion immediately permits attacking toad again")
+-- 追击主目标的DoDodge必须在原线程，监督协程不能被整段躲避阻塞。
+c.bosses=nil;c.encounters=nil;c.supplies=nil;c.crabking={Tick=function() end};toad.pos=Vector3(10,0,0)
+local dodge_calls,checks,updates=0,0,0;local side=false
+h.IsAttackPre=function() return {atkanim="atk"} end
+h.DoDodge=function() dodge_calls=dodge_calls+1;coroutine.yield("supervisor_blocked") end
+c.travel.UpdateDodge=function() updates=updates+1 end
+c.mechanisms={c=c,Tick=function(self)
+ checks=checks+1
+ if side then return require("shadowself/control/mechanisms").Incoming(self) end
+ return false
+end}
+bridge:PauseAttack();local before_start=starts;now=now+.2
+local ok,reason=coroutine.resume(routines[bridge.supervisor]);assert(ok and reason~="supervisor_blocked" and dodge_calls==0 and starts==before_start+1 and bridge:OwnsThread(),"pursuit yields to native thread without blocking supervisor")
+h.shadowself_dodging=toad;local before_stop=stops;now=now+.04
+assert(coroutine.resume(routines[bridge.supervisor]));assert(stops==before_stop and updates==1,"long-distance active native dodge is not killed by pursuit/gear branch")
+local rook=entity("rook",-7,0);rook.anim="atk_pre";rook.frame=15;c.enemies={toad,rook};side=true;c.moved=nil;now=now+.04
+assert(coroutine.resume(routines[bridge.supervisor]));assert(checks>=3 and c.moved and math.abs(c.moved.z)>2 and not bridge:OwnsThread(),"actual off-target charge preempts an in-flight primary dodge on the next supervisor frame")
 bridge.supervisor=nil;pc.DoAction=bridge.action_old
 StartThread=oldStart;Sleep=oldSleep;KillThreadsWithID=oldKill;IsSimPaused=oldPaused
 package.loaded["shadowself/control/actions"]=savedA;require("shadowself/native").context=savedN

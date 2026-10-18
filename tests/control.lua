@@ -116,7 +116,7 @@ local client={replica={combat={IsAlly=function() return false end}}}
 enemy.replica={combat={GetTarget=function() return client end}}
 local b=Bridge(client)
 assert(b:Start({kind="fight",target=""},function() return true end))
-assert(started==1 and HitAndRun.dodgetest==true and m_options.hitandrun_walkway==4)
+assert(started==1 and HitAndRun.dodgetest==true and m_options.hitandrun_walkway==true)
 HitAndRun:GetAttackTargets(20)
 assert(HitAndRun.selected_ents[enemy] and not HitAndRun.selected_ents[neutral] and not HitAndRun.selected_ents[other],"default combat filters neutral and players")
 neutral.replica={combat={GetTarget=function() end}}

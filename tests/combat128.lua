@@ -118,6 +118,9 @@ assert(bridge.allowed(rook) and h:GetClosestTarget()==knight,"actual target pick
 local before=hits;h:OnKeyFrame();h:CloseAndAttack(rook);h:ShouldAtkWhenDodging(rook)
 assert(hits==before,"actual keyframe/close/captured dodge followup cannot hit rook while another target remains")
 h.selected_ents={[rook]=true};assert(h:GetClosestTarget()==rook);h:OnKeyFrame();assert(hits==before,"last rook still waits for observed charge recovery");c.bosses.rooks[rook]={ready=true};h:OnKeyFrame();assert(hits==before+1,"observed charge recovery permits native attacks")
+bridge:PauseAttack();c.special_active=false;c.blocked=true;before=hits
+h:OnKeyFrame();h:CloseAndAttack(rook);assert(hits==before,"delayed old attack callback cannot steal movement while mechanism owns the paused thread")
+c.blocked=false
 local spike=entity("sandspike_tall",2,0);bridge.priority_target=spike;assert(not bridge.allowed(spike),"sand spike rejected before priority and explicit command overrides")
 -- 帝王蟹过滤也必须先于priority/resume/显式指令，不让原线程误补刀小蟹。
 local king=entity("crabking",0,0);local wall=entity("crabking_icewall",2,0);local crabmob=entity("crabking_mob",3,0)

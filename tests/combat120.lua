@@ -44,7 +44,8 @@ local task=env.StartThread(function()
 end,"test_native")
 bridge.thread=task;tune.Cheatthread=task;local co=task.co
 local ok,why=coroutine.resume(co);assert(ok,why);assert(env.scheduler.tasks[co] and bridge.pause_requested)
-bridge:PauseAttack();assert(stopped==1 and not bridge.thread and not env.scheduler.tasks[co],"supervisor removes sleeping attack task safely")
+local replayed=0;bridge.coordinator={blocked=true,last_point=Vector3(4,0,2)};local oldPos=POS_util;POS_util={GoToPoint=function(_,x,z) assert(x==4 and z==2);replayed=replayed+1 end}
+bridge:PauseAttack();assert(stopped==1 and not bridge.thread and not env.scheduler.tasks[co],"supervisor removes sleeping attack task safely");assert(replayed==1 and bridge.coordinator.next_move>GetTime(),"deferred stop replays external escape before movement throttle");POS_util=oldPos
 -- Weak-head refresh inside native coroutine is pure selection, never a movement/stop call.
 local head=entity("lunarthrall_plant");head.tags.lunarthrall_plant=true;head.anim="tired_loop_large"
 c.enemies={head};c.h.ent=head;c.brightshade_target=head;c.bridge.supervisor={};c.bridge.wrappers={PreTheLoop={old=function() end}}

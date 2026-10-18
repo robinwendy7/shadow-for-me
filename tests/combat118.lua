@@ -112,7 +112,7 @@ b.moon_hold=nil
 for _,name in ipairs({"warg","claywarg","gingerbreadwarg","mutatedwarg"}) do
  local wolf=entity(name);wolf.anim="atk";wolf.frame=10
  assert(b:Dodge(wolf,false).noattack,name.." bite dodge")
- wolf.frame=12;assert(not b:Dodge(wolf,false),name.." recovery output")
+ wolf.frame=12+require("shadowself/control/nettiming").Frames(c);assert(not b:Dodge(wolf,false),name.." recovery after replication margin")
 end
 package.loaded["shadowself/control/actions"]=savedA;require("shadowself/native").context=savedN
 print("PASS: bare eye vs arm regrowth, fume event/child fallback and real bomb movement ticks, exclusive queen gear owner, ten-guard long straight pull, antlion clear-side/backtracking, continuous weak-head output, bishop circle exit, fixed lunar lane and four warg variants")

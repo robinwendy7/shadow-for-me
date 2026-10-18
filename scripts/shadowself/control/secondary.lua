@@ -7,6 +7,7 @@ local Secondary=Class(function(self,c)
 end)
 function Secondary:Scan()
     local now=GetTime()
+    self.hazards=self.c.hazards or {}
     if now<(self.next_scan or 0) then return end
     self.next_scan=now+.05;self.enemies={};self.observed={};self.data={}
     local c=self.c;local p=self.player:GetPosition()
@@ -109,7 +110,7 @@ function Secondary:Wrap(primary,data,checktab)
     end
     local c=self.c
     if c.charge_target==primary then return data end -- keep fixed straight charge dodge
-    local has_other=false
+    local has_other=#self.hazards>0
     for _,e in ipairs(self.enemies) do if e~=primary then has_other=true;break end end
     if not has_other then return data end
     local cached=self.cache[primary]
@@ -135,6 +136,7 @@ function Secondary:BeforeAttack(check_only)
     local preferred=self.c.brightshade_target
     if preferred and not require("shadowself/control/plant").Weak(preferred) then self.c.brightshade_target=nil;preferred=nil end
     if preferred and preferred:IsValid() and self.c.h.ent~=preferred then self.pending=nil;self:Select(preferred);return false end
+    self:Scan()
     local e=self.pending;self.pending=nil
     -- 每次攻击都检查侧方真实前摇，不依赖上次走位留下的pending。
     local danger=self:Danger(self.c.h.ent)
@@ -142,6 +144,7 @@ function Secondary:BeforeAttack(check_only)
         if check_only then self.pending=danger else self:Select(danger) end
         return false
     end
+    if require("shadowself/control/incoming").ApproachBlocked(self.c,self.enemies,self.c.h.ent) then return false end
     return true
 end
 return Secondary

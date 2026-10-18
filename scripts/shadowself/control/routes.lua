@@ -41,8 +41,9 @@ function Routes:AntPoint(e)
  -- 先尝试同一个时针方向的小步，长度不随离Boss的半径放大。
  for _,side in ipairs({preferred,-preferred}) do
   for _,length in ipairs({1.75,2,2.25}) do
-   local a=theta+side*2*math.asin(math.min(.95,length/(2*radius)))
-   local point=Vector3(ep.x+math.cos(a)*radius,0,ep.z+math.sin(a)*radius)
+   local a=theta+side*math.atan(length/radius)
+   local r=radius/math.cos(a-theta)
+   local point=Vector3(ep.x+math.cos(a)*r,0,ep.z+math.sin(a)*r)
    if Nav.Risk(c,point,e)==0 and planner.Corridor(c,p,point,e) then self.sides[e]=side;return point end
   end
  end
@@ -210,7 +211,7 @@ function Routes:Dodge(e,base)
   for _,name in ipairs({"atk_breath_pre","atk_breath_loop","atk_breath_pst"}) do
    if anim(e,name) then return self:OrbitData(e,name,true) end
   end
-  if anim(e,"atk") and frame(e)<=11 then return {atkanim="atk",point="target",dist=5,update=false,angle=0,noattack=true} end
+  if anim(e,"atk") and frame(e)<=11+require("shadowself/control/nettiming").Frames(self.c) then return {atkanim="atk",point="target",dist=5,update=false,angle=0,noattack=true} end
  end
  if require("shadowself/control/plant").Weak(e) then return false end
  if e.HasTag and (e:HasTag("lunarthrall_plant_end") or e:HasTag("lunarthrall_plant_segment")) then
@@ -231,18 +232,19 @@ function Routes:Dodge(e,base)
   for _,name in ipairs({"attack_pre","attack","cast_pre"}) do
    if anim(e,name) and (name~="attack" or frame(e)<=3) then
     local state=self.antlion;local f=frame(e)
-    if not state or state.target~=e or name=="attack_pre" and (state.name~="attack_pre" or f<state.frame) then
-     state={target=e,name=name,point=self:AntPoint(e),frame=f};self.antlion=state
+    if not state or state.target~=e or (name=="attack_pre" or name=="cast_pre") and (state.name~=name or f<state.frame) then
+     state={target=e,name=name,point=self:AntPoint(e),origin=self.c.player:GetPosition(),frame=f};self.antlion=state
     end
     state.frame=f;state.name=name
     if not state.done and not Nav.Safe(self:AntContext(),state.point,e) then state.point=self:AntPoint(e) end
-    if self.c.player:GetPosition():DistSq(state.point)<.12^2 then
+    if self.c.player:GetPosition():DistSq(state.point)<.12^2 and state.origin and state.origin:DistSq(state.point)>.25 then
      state.done=true
     end
     if state.done then return false end
     return {atkanim=name,point="player",dist=1.5,update=false,exclusive=true,noattack=true,fn=function() return state.point end}
    end
   end
+  self.antlion=nil
  elseif n=="vault_pillar_guard" then
   if anim(e,"atk_1") and frame(e)<29 then return self:OrbitData(e,"atk_1",true) end
   if anim(e,"atk_2") and frame(e)<26 then return self:OrbitData(e,"atk_2",true) end

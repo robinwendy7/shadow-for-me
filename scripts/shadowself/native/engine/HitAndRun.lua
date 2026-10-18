@@ -148,35 +148,46 @@ function HitAndRun:GetClosestTarget()
 end
 
 do --走向和攻击函数
-    -- 用当前原版WALKTO动作取消后摇，不再发送缺少预测会话的PredictWalking。
+    -- 完整原版预测移动会话：DoAction在busy时拒绝WALKTO，不能靠它发送躲避。
     local function doPredictwalk(x,z)
         local pc=ThePlayer.components.playercontroller
-        local point=Vector3(x,0,z)
-        if pc:CanLocomote() then
-            local action=BufferedAction(pc.inst,nil,ACTIONS.WALKTO,nil,point)
-            if not pc.ismastersim then
-                local platform,rx,rz=pc:GetPlatformRelativePosition(x,z)
-                local function send()
-                    SendRPCToServer(RPC.LeftClick,ACTIONS.WALKTO.code,rx,rz,nil,true,pc:EncodeControlMods(),nil,nil,platform,platform~=nil)
+        local platform,rx,rz=pc:GetPlatformRelativePosition(x,z)
+        if RPC.PredictWalking then
+            SendRPCToServer(RPC.PredictWalking,rx,rz,false,not HitAndRun.shadowself_predicting,platform,platform~=nil,nil,false)
+            HitAndRun.shadowself_predicting=true
+        end
+        if not pc.IsBusy or not pc:IsBusy() then
+            if pc:CanLocomote() then
+                local action=BufferedAction(pc.inst,nil,ACTIONS.WALKTO,nil,Vector3(x,0,z))
+                if not pc.ismastersim then
+                    local function send() SendRPCToServer(RPC.LeftClick,ACTIONS.WALKTO.code,rx,rz,nil,true,pc:EncodeControlMods(),nil,nil,platform,platform~=nil) end
+                    if pc.locomotor then action.preview_cb=send else action.non_preview_cb=send end
                 end
-                if pc.locomotor then action.preview_cb=send else action.non_preview_cb=send end
+                pc:DoAction(action)
+            else
+                SendRPCToServer(RPC.LeftClick,ACTIONS.WALKTO.code,rx,rz,nil,true,pc:EncodeControlMods(),nil,nil,platform,platform~=nil)
             end
-            pc:DoAction(action)
-        else
-            local platform,rx,rz=pc:GetPlatformRelativePosition(x,z)
-            SendRPCToServer(RPC.LeftClick,ACTIONS.WALKTO.code,rx,rz,nil,true,pc:EncodeControlMods(),nil,nil,platform,platform~=nil)
+        end
+    end
+    function HitAndRun:StopPredictWalk()
+        if self.shadowself_predicting then
+            if RPC.PredictWalking then SendRPCToServer(RPC.PredictWalking,nil,nil,nil,nil,nil,nil,nil,true) end
+            if RPC.StopWalking then SendRPCToServer(RPC.StopWalking) end
+            self.shadowself_predicting=nil
         end
     end
     function HitAndRun:DoPredictWalk(x,z) return doPredictwalk(x,z) end
     function HitAndRun:_PredictWalk(point) return doPredictwalk(point.x,point.z) end
     function HitAndRun:PredictWalk(ppos,mpos,target)
-        local aim=POS_util:CalculateAimPos(ppos,mpos or target:GetPosition(),0,.35)
+        local aim=POS_util:CalculateAimPos(ppos,target and target:GetPosition() or mpos,target and math.pi or 0,.15)
+        if HitAndRun.shadowself_backstep then aim=HitAndRun.shadowself_backstep(aim,target) end
         return doPredictwalk(aim.x,aim.z)
     end
 
 	--攻击
 	function HitAndRun:CloseAndAttack(target, force_force)
 		if not target or not ThePlayer then return end
+        HitAndRun:StopPredictWalk()
 		local pos = target:GetPosition()
 		local noforce = true
 		if force_force then
@@ -228,17 +239,9 @@ do --走向和攻击函数
 			end
 		end
 		local x, z = fx, fz
-		local ActiveItem = ThePlayer.replica.inventory:GetActiveItem()
-		local playercontroller = ThePlayer.components.playercontroller
-		if playercontroller:CanLocomote() then
-			local action = BufferedAction(playercontroller.inst, nil, ACTIONS.WALKTO, nil,
-				Vector3(x, 0, z))
-			playercontroller:DoAction(action)
-		else
-			local platform, pos_x, pos_z = playercontroller:GetPlatformRelativePosition(x, z)
-			SendRPCToServer(RPC.LeftClick, ACTIONS.WALKTO.code, pos_x, pos_z, ActiveItem, nil, nil,
-				nil, nil, platform, platform ~= nil)
-		end
+        local point=Vector3(x,0,z)
+        if HitAndRun.shadowself_backstep then point=HitAndRun.shadowself_backstep(point,rangecheck_ent or HitAndRun.ent) end
+        return doPredictwalk(point.x,point.z)
 	end
 
 	function HitAndRun:PredictWalkTo(startpos, stoppos, walkdistance, checkrange, rangecheck_ent, trydodging)
@@ -258,7 +261,9 @@ do --走向和攻击函数
 			end
 		end
 		local x, z = fx, fz
-		HitAndRun:_PredictWalk(Vector3(x, 0, z))
+		local point=Vector3(x,0,z)
+        if HitAndRun.shadowself_backstep then point=HitAndRun.shadowself_backstep(point,rangecheck_ent or HitAndRun.ent) end
+        HitAndRun:_PredictWalk(point)
 	end
 end
 do --功能性函数
@@ -789,6 +794,7 @@ end
 
 --停止线程
 function HitAndRun:StopHitAndRun()
+    HitAndRun:StopPredictWalk();HitAndRun.shadowself_dodging=nil
 	if GAME_util:InGame() and TUNING.Cheatthread then
 		--ThePlayer:EnableMovementPrediction(true)
 		KillThreadsWithID(TUNING.Cheatthread.id) --挂起线程 让线程不动

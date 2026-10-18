@@ -40,6 +40,7 @@ function POS_util:CalculateDirect(pos1, pos2)
 end
 
 function POS_util:GoToPoint(x, z)
+    if HitAndRun and HitAndRun.DoPredictWalk then return HitAndRun:DoPredictWalk(x,z) end
 	local ActiveItem = ThePlayer.replica.inventory:GetActiveItem()
 	local playercontroller = ThePlayer.components.playercontroller
 	if playercontroller:CanLocomote() then

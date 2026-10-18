@@ -1,9 +1,9 @@
 -- SGbeequeen: locked target DoAttack at frame 14, HIT_RANGE=6. No cone dodge.
 return function(c,queen,base)
     local a=queen.AnimState
-    if not a:IsCurrentAnimation("atk") or a:GetCurrentAnimationFrame()>=14 then return base end
+    if not a:IsCurrentAnimation("atk") or a:GetCurrentAnimationFrame()>=14+require("shadowself/control/nettiming").Frames(c) then return base end
     local radius=c.player.GetPhysicsRadius and c.player:GetPhysicsRadius(0) or .5
-    c.queen_dodge=c.queen_dodge or {atkanim="atk",point="target",update=true,angle=0}
+    c.queen_dodge=c.queen_dodge or {atkanim="atk",point="target",update=true,angle=0,noattack=true}
     c.queen_dodge.dist=(TUNING.BEEQUEEN_HIT_RANGE or 6)+radius+.25
     if c.beequeen and c.player.GetPosition then
         c.queen_dodge.fn=function(_,start,finish,angle,dist)

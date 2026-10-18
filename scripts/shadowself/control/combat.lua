@@ -17,6 +17,8 @@ function Bridge:Start(plan,matches)
         if options then self.options[key]={present=options[key]~=nil,value=options[key]};options[key]=value end
     end
     option("hitandrun_dodgetest","dodgetest",true)
+    option("hitandrun_walkway","walkway",true)
+    option("hitandrun_walktime","walktime",1)
     option("hitandrun_targetmode","targetmode",false)
     option("hitandrun_priority_undermouse","priority_undermouse",false)
     self.plan=plan;self.clear_since=nil;self.next_finish_scan=nil;self.finished=false
@@ -110,6 +112,7 @@ function Bridge:PauseAttack()
     if self.thread and self.thread.co and self.thread.co==coroutine.running() then
         self.pause_requested=true;return
     end
+    local resume_point=self.pause_requested and self.coordinator and self.coordinator.blocked and self.coordinator.last_point
     self.pause_requested=nil
     if self:OwnsThread() then
         Debug.Event(self.coordinator,"native_pause",{target=Debug.Entity(self.h.ent)})
@@ -121,6 +124,12 @@ function Bridge:PauseAttack()
         end
     end
     self.thread=nil
+    if self.h then self.h.shadowself_dodging=nil end
+    if resume_point then
+        -- 原线程退出会StopWalking；同帧重发已交给机制的退场点，不能等100ms移动节流。
+        self.native.POS_util:GoToPoint(resume_point.x,resume_point.z)
+        self.coordinator.next_move=GetTime()+.1
+    end
 end
 function Bridge:ResumeAttack()
     if self:OwnsThread() then return end
@@ -173,6 +182,8 @@ function Bridge:Supervise()
                     if picked and picked~=target then target=picked;h.ent=target;self.wrappers.PreTheLoop.old(h) end
                     if support or mode=="move" or mode=="support" then
                         self:PauseAttack()
+                    elseif self:OwnsThread() and h.shadowself_dodging then
+                        c.travel:UpdateDodge(c.snapshot)
                     else
                         local d=math.sqrt(self.player:GetPosition():DistSq(target:GetPosition()))
                         local reach=c.gear:AttackRange()+target:GetPhysicsRadius(0)
@@ -182,7 +193,9 @@ function Bridge:Supervise()
                             c.travel.restore_dodge=nil;c.travel.role="move"
                             c.special_active=false;c.queen_active=false;c.blocked=false
                             local data=h:IsAttackPre(target,1)
-                            if data then h:DoDodge(data)
+                            if data then
+                                -- 原线程执行躲避，监督协程继续检查侧方。
+                                self.chasing=nil;c.travel.chasing=nil;self:ResumeAttack()
                             else
                                 local special=target.prefab=="beequeen" or target.prefab=="beeguard"
                                 if special then c:NativePulse() end
@@ -270,6 +283,12 @@ function Bridge:Coordinate(plan)
         local current=function(object,...) return fn(old,object,...) end
         self.wrappers[name]={old=old,current=current};h[name]=current
     end
+    self.saved.shadowself_backstep={value=self.h.shadowself_backstep}
+    self.h.shadowself_backstep=function(point,target)
+        return target and self.coordinator.secondary:Point(point,target) or point
+    end
+    self.saved.shadowself_latency_frames={value=self.h.shadowself_latency_frames}
+    self.h.shadowself_latency_frames=function() return require("shadowself/control/nettiming").Frames(self.coordinator) end
     wrap("PreTheLoop",function(old,object,...)
         old(object,...);self.coordinator:NativePulse()
         if not self.coordinator.special_active then self.coordinator.secondary:Pulse() end
@@ -280,6 +299,7 @@ function Bridge:Coordinate(plan)
         wrap(name,function(old,object,...)
             local c=self.coordinator
             if self.pause_requested then return false end
+            if require("shadowself/control/attackwindow").Blocked(c,object.ent) then return false end
             local explicit=...;local victim=(name=="CloseAndAttack" or name=="ShouldAtkWhenDodging") and type(explicit)=="table" and explicit.prefab and explicit or object.ent
             if require("shadowself/control/targetpolicy").Rook(victim) and require("shadowself/control/targetpolicy").Other(self,victim) then return false end
             if c.crabking and c.crabking:Active() and not c.crabking:Allowed(victim) then return false end
@@ -290,7 +310,7 @@ function Bridge:Coordinate(plan)
             if object.ent and not self.allowed(object.ent) then return false end
             if c.bosses and c.bosses.AttackBlocked and c.bosses:AttackBlocked(object.ent) then return false end
             if self.chasing then return false end
-            if c.special_active and c.blocked then return false end
+            if c.blocked and (c.special_active or not self:OwnsThread()) then return false end
             if not c.secondary:BeforeAttack(name=="ShouldAtkWhenDodging") then return false end
             if name=="CloseAndAttack" then
                 if c.travel.finish_deferred then c.travel:EndDodge(c.snapshot) end

@@ -56,7 +56,7 @@ local qattack=require("shadowself/control/queenattack")
 local qdata=qattack(c,queen,false)
 assert(qdata.point=="target" and qdata.angle==0 and qdata.dist>=6.75,"queen retreat exits native six-unit targeted hit range")
 frame=13;assert(qattack(c,queen,false)==qdata,"one native dodge table until hit frame")
-frame=14;assert(qattack(c,queen,false)==false,"queen recovery returns to native attack without waiting for the whole animation")
+frame=14;assert(qattack(c,queen,false),"network margin holds through replicated impact frame");frame=14+require("shadowself/control/nettiming").Frames(c);assert(not qattack(c,queen,false),"release after impact margin rather than whole animation")
 -- Interrupted equip acknowledgements cannot stall after the native hit state.
 local state="hit";p.AnimState={IsCurrentAnimation=function(_,a) return state==a end}
 c.gear={pending={untiltime=now+1.2},next_request=100};c.next_move=100;c.last_action_kind="attack";c.attack_until=100

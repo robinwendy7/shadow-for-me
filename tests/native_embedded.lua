@@ -68,6 +68,12 @@ for _,entry in pairs(n.HitAndRun.targetanimtable.daywalker) do
  assert(entry.atk_start_frame==v[1] and entry.atk_stop_frame==v[2] and entry.dist==v[3] and entry.update==v[4] and math.abs(entry.angle-v[5]*math.pi/180)<.001,"daywalker uses original 3014 animation/frame/angle/range")
 end
 assert(pig_count==5)
+local oldanim=n.ENT_util.GetAnimation;n.ENT_util.GetAnimation=function(_,e) return e.anim end
+local pig={prefab="daywalker",anim="run_pre",HasTag=function() return false end,AnimState={GetCurrentAnimationFrame=function() return 0 end}}
+assert(n.HitAndRun:IsAttackPre(pig),"visible pounce windup must not wait for delayed replicated attack tag")
+n.HitAndRun.shadowself_latency_frames=function() return 5 end;pig.anim="atk_slam_pre";pig.AnimState.GetCurrentAnimationFrame=function() return 5 end
+assert(n.HitAndRun:IsAttackPre(pig),"native frame10 prep starts five observed frames earlier under network budget")
+n.HitAndRun.shadowself_latency_frames=nil;n.ENT_util.GetAnimation=oldanim
 for _,entry in pairs(n.HitAndRun.targetanimtable.alterguardian_phase2) do
  if entry.atkanim=="attk_chop" then assert(entry.dist==nil,"native 40-unit summon retreat removed") end
 end

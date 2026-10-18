@@ -83,11 +83,12 @@ do --关于躲避的函数
 		if ent == nil or dodgetab == nil then return end
 
 		HitAndRun.guid = 0
+        HitAndRun.shadowself_dodging=ent
 		local locked_ent_pos, locked_player_pos = HitAndRun.pos, HitAndRun.ppos
 		ThePlayer:PushEvent("EquipItem", { type = "walk_hands" })
 
 		while true do
-            if ThePlayer~=owner or not owner:IsValid() or not owner.components.playercontroller then return end
+            if ThePlayer~=owner or not owner:IsValid() or not owner.components.playercontroller then HitAndRun.shadowself_dodging=nil;return end
 			if dodgetab.breakdodgefn and dodgetab.breakdodgefn(ent) then
 				reset_idle_ticks()
 				break
@@ -107,7 +108,7 @@ do --关于躲避的函数
 
 			Sleep(FRAMES)
 
-            if ThePlayer~=owner or not owner:IsValid() or not owner.components.playercontroller then return end
+            if ThePlayer~=owner or not owner:IsValid() or not owner.components.playercontroller then HitAndRun.shadowself_dodging=nil;return end
 			local next_dodge = HitAndRun:IsAttackPre(ent, 1, dodgetab)
 			if not next_dodge and (not dodgetab.avoid_break or not dodgetab.avoid_break(ent)) then
 				break
@@ -119,6 +120,7 @@ do --关于躲避的函数
 			end
 		end
 
+        HitAndRun.shadowself_dodging=nil
 		stop_player_if_moving()
 		HitAndRun:CancelDodgingAtk(ent)
         local follow=HitAndRun.shadowself_after_dodge and HitAndRun.shadowself_after_dodge(ent) or ent
@@ -140,6 +142,7 @@ do --关于躲避的函数
 			start_frame = math.min(ENT_util:FnOrNum(data.atk_frame_calculate, target, data.atk_start_frame,
 				stop_frame, nil, data), stop_frame)
 		end
+        if HitAndRun.shadowself_latency_frames then start_frame=math.max(0,start_frame-HitAndRun.shadowself_latency_frames()) end
 		return start_frame, stop_frame
 	end
 
@@ -170,7 +173,7 @@ do --关于躲避的函数
 			elseif targetframe >= atk_start_frame and targetframe <=
 				atk_stop_frame and targetanim == atkanim then
 				--checkatktag
-				if data.checkatktag and not target:HasTag("attack") then
+				if data.checkatktag and not target:HasTag("attack") and not (target.prefab=="daywalker" and targetanim=="run_pre") then
 					return
 				end
 				if data.breakdodgefn and data.breakdodgefn(target) then

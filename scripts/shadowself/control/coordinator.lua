@@ -75,7 +75,7 @@ end
 function Coordinator:Scan()
     local now=GetTime()
     if now<(self.next_scan or 0) then return end
-    self.next_scan=now+.1;self.enemies={};self.observed={}
+    self.next_scan=now+.05;self.enemies={};self.observed={}
     local pos=self.player:GetPosition()
     self.hazards={}
     for _,e in ipairs(TheSim:FindEntities(pos.x,pos.y,pos.z,24)) do
@@ -96,6 +96,7 @@ function Coordinator:Scan()
             and (e:HasTag("hostile") or e:HasTag("monster") or ec.GetTarget and ec:GetTarget()==self.player)
         if self.bridge.allowed(e) or threat or require("shadowself/control/plant").Middle(e) then
             self.enemies[#self.enemies+1]=e
+            require("shadowself/control/attackwindow").Observe(self,e)
             -- 攻击前摇来自 3014 原表，不使用旧 AI 的攻击帧表。
             local idle=self.h.idle_ticks
             local dodge=rawpre(self.h,e,0)
