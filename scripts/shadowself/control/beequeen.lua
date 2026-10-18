@@ -75,7 +75,6 @@ function Queen:ReleaseTravel()
     self.travelling=nil
 end
 function Queen:Strike(queen,pos,qp,distance)
-    if require("shadowself/control/attackwindow").Tick(self.c,queen) then return true end
     if self.c.gear then self.c.gear.forced_weapon=nil end
     local c=self.c;local combat=c.player.replica and c.player.replica.combat
     local reach=(c.gear and c.gear.AttackRange and c.gear:AttackRange() or combat and combat.GetAttackRangeWithWeapon and combat:GetAttackRangeWithWeapon() or 2)

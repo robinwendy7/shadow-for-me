@@ -50,11 +50,11 @@ end
 local bone=item("armorskeleton",EQUIPSLOTS.BODY);inventory={bone};equipped.body=bone;entities={};now=1;m:Scan()
 local existing=Mechanisms(c);assert(existing.bone_ready==now+5,"unknown pre-takeover bone cooldown waits a full cooldown")
 local klaus=ent("klaus");klaus.anim="attack_chomp";klaus.frame=20;local native={native=true}
-assert(m:Dodge(klaus,native)==native,"unknown bone cooldown cannot permit facetanking")
+assert(m:Dodge(klaus,native).noattack,"unknown cooldown uses outward dodge, never native push-in")
 now=2.1;assert(m:Dodge(klaus,native)==false,"ready bone permits attacks during chomp windup")
-klaus.frame=35;assert(m:Dodge(klaus,native)==native,"bite resolution returns to native followup dodge")
+klaus.frame=35;assert(m:Dodge(klaus,native)==false,"hold armored position through actual bite until shield feedback or next frame")
 local shield=ent("shadow_shield3");shield.owner=p.entity;entities={shield};m:Scan();klaus.frame=20
-assert(m:Dodge(klaus,native)==native,"observed shield consumption prevents another cooldown tank")
+assert(m:Dodge(klaus,native).noattack,"observed shield starts outward exit without old push-in table")
 local staff=item("orangestaff",EQUIPSLOTS.HANDS);local shell=item("armorsnurtleshell",EQUIPSLOTS.BODY)
 inventory={bone,staff,shell};equipped.body=bone;equipped.hands=nil;p.pos=Vector3(5,0,0)
 local robot=ent("wagboss_robot");robot.anim="atk_missile_pre1";local missile=ent("wagboss_missile");entities={robot,missile};now=10

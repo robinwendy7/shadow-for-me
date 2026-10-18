@@ -11,22 +11,14 @@ end
 local p=ent("wilson",3.5,0);local ping=80;TheWorld={ismastersim=false,state={}};TheNet={GetPing=function() return ping end};TheSim={FindEntities=function() return {} end}
 local c={player=p,enemies={},observed={},hazards={},gear={AttackRange=function() return 2 end},snapshot={},h={},bridge={PauseAttack=function() end},travel={BeginDodge=function() end},actions={SafePoint=function() return true end}}
 function c:Latency() return ping/1000+.1 end;function c:Speed() return 6 end;function c:Move(q) self.moved=q end
-local W=require("shadowself/control/attackwindow")
+local QueenAttack=require("shadowself/control/queenattack")
 for _,ms in ipairs({50,80,100}) do
- ping=ms;now=0;c.attack_windows=nil;local queen=ent("beequeen",0,0,1.5);queen.anim="atk";queen.frame=0
- assert(W.Blocked(c,queen),"no greed during windup")
- p.pos=Vector3(7,0,0);now=.6;queen.frame=18
- assert(not W.Blocked(c,queen),"early cooldown permits approach + ONE impact + retreat using speed6, ping="..ms)
- p.pos=Vector3(3.5,0,0);now=1.4;queen.anim="idle"
- assert(W.Blocked(c,queen) and W.Tick(c,queen) and c.moved:DistSq(queen.pos)>=6.8^2,"do not commit another strike when retreat budget is exhausted")
- p.pos=c.moved;now=2.1;W.Tick(c,queen)
- assert(c.moved:DistSq(queen.pos)<5^2,"expired cooldown must rebait, not flee forever")
- p.pos=c.moved;now=2.15;W.Tick(c,queen);assert(c.moved:DistSq(queen.pos)>6.8^2,"bait contact immediately requests retreat without waiting for replicated attack")
- queen.anim="atk";queen.frame=0;now=2.2;W.Observe(c,queen)
- assert(c.attack_windows[queen].start>2,"new attack resets observed deadline")
+ ping=ms;local queen=ent("beequeen",0,0,1.5);queen.anim="atk";queen.frame=0
+ assert(QueenAttack(c,queen,false).dist>=6.75)
+ queen.frame=14;assert(QueenAttack(c,queen,false))
+ queen.frame=15;assert(QueenAttack(c,queen,{old=true})==false,"actual hit resolution overrides stale native fallback immediately")
 end
-local asleep=ent("beequeen");asleep.anim="sleep_loop";now=20
-assert(not W.Blocked(c,asleep) and not W.Tick(c,asleep),"sleeping queen remains an immediate damage window, never a rebait loop")
+assert(not io.open("scripts/shadowself/control/attackwindow.lua","r"),"generic budget is retired, not patched with another delay")
 local boss={c=c};local routes=require("shadowself/control/routes")(boss)
 local ant=ent("antlion",0,0,4);p.pos=Vector3(4.6,0,0);ant.anim="cast_pre";ant.frame=5;c.attack_windows=nil
 local data=routes:Dodge(ant,false);local q=data:fn()
@@ -64,4 +56,4 @@ local mushroom=ent("mushroombomb");mushroom.anim="explode_pre";mushroom.frame=0;
 assert(#b:Zones({mushroom})==0);mushroom.frame=30;assert(#b:Zones({mushroom})==1,"leave early enough to exit before earliest random explosion")
 require("shadowself/native").context=oldN
 GetTime,TheWorld,TheNet,TheSim=saved.time,saved.world,saved.net,saved.sim
-print("PASS: 50/80/100ms at speed6 queen one-hit/exit/rebait/new-cycle budget; true ant cast reset/body-safe tangent/blocked retry; side pre-charge; bear pit lure; first crystal lateral; earlier distinct bomb timing")
+print("PASS: 50/80/100ms queen actual-hit release and retired generic budget; true ant cast reset/body-safe tangent/blocked retry; side pre-charge; bear pit lure; first crystal lateral; earlier distinct bomb timing")

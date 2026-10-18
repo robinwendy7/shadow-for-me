@@ -96,7 +96,6 @@ function Coordinator:Scan()
             and (e:HasTag("hostile") or e:HasTag("monster") or ec.GetTarget and ec:GetTarget()==self.player)
         if self.bridge.allowed(e) or threat or require("shadowself/control/plant").Middle(e) then
             self.enemies[#self.enemies+1]=e
-            require("shadowself/control/attackwindow").Observe(self,e)
             -- 攻击前摇来自 3014 原表，不使用旧 AI 的攻击帧表。
             local idle=self.h.idle_ticks
             local dodge=rawpre(self.h,e,0)

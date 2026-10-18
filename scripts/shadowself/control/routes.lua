@@ -159,18 +159,29 @@ function Routes:Bishop(e,base)
   for _,fx in ipairs(self.boss.entities or {}) do if fx.prefab=="bishop_charge2_fx" and fx:IsValid() and fx:GetPosition():DistSq(mark)<3^2 then mark=fx:GetPosition();break end end
  end
  state.mark=Vector3(mark.x,0,mark.z)
- local radius=math.max(2.2,distance(p,ep));local safe=2+c.player:GetPhysicsRadius(0)+.7
- local function clear(v) return v:DistSq(state.mark)>=safe^2 end
+ local radius=state.radius or math.max(2.2,distance(p,ep));state.radius=radius;local safe=2+c.player:GetPhysicsRadius(0)+.7
+ local tracking=name~="atk2_pst"
+ local function clear(v)
+  if tracking then return v:DistSq(state.mark)+.02>=math.min(safe^2,c.player:GetPosition():DistSq(state.mark)) end
+  return v:DistSq(state.mark)>=safe^2
+ end
  local data={atkanim=name,point="player",dist=safe,update=true,exclusive=true,noattack=true,safe=clear}
  data.fn=function()
   local pos=c.player:GetPosition();local center=e:GetPosition()
-  if clear(pos) then return pos end
+  if not tracking and clear(pos) then return pos end
   local theta=math.atan2(pos.z-center.z,pos.x-center.x)
   local preferred=state.side or 1
   for _,side in ipairs({preferred,-preferred}) do
-   for step=.35,2.8,.15 do
-    local a=theta+side*step;local point=Vector3(center.x+math.cos(a)*radius,0,center.z+math.sin(a)*radius)
+   if tracking then
+    -- 标记仍在追踪时持续同方向侧绕，不能到旧安全点就停，等标记追上。
+    local step=math.min(.65,1.5/radius);local a=theta+side*step
+    local point=Vector3(center.x+math.cos(a)*radius,0,center.z+math.sin(a)*radius)
     if clear(point) and Nav.Safe(c,point,e) then state.side=side;return point end
+   else
+    for step=.35,2.8,.15 do
+     local a=theta+side*step;local point=Vector3(center.x+math.cos(a)*radius,0,center.z+math.sin(a)*radius)
+     if clear(point) and Nav.Safe(c,point,e) then state.side=side;return point end
+    end
    end
   end
   return Nav.Escape(c,Vector3(pos.x+safe,0,pos.z),e) or pos
@@ -199,10 +210,6 @@ function Routes:Dodge(e,base)
  local n=e.prefab
  if n=="shadowthrall_horns" and anim(e,"jump") and frame(e)<=31 then
   return {atkanim="jump",point="target",dist=2.8+self.c.player:GetPhysicsRadius(0)+.6,angle=0,update=true,noattack=true}
- end
- if n=="dragonfly" and anim(e,"atk") then
-  if frame(e)>18 then return false end
-  return {atkanim="atk",point="target",dist=(TUNING.DRAGONFLY_HIT_RANGE or 5)+self.c.player:GetPhysicsRadius(0)+.4,update=true,noattack=true}
  end
  if n=="rabbitking_aggressive" then return self:Rabbit(e,base) end
  if n=="rabbitkingminion_bunnyman" and anim(e,"atk") and frame(e)<13 then return {atkanim="atk",point="target",dist=4,update=false,noattack=true} end

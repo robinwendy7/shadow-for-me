@@ -3,7 +3,7 @@ local G={}
 function G.Tick(q,queen,now)
  local c=q.c;local p=c.player;local a=queen.AnimState
  local frame=a.GetCurrentAnimationFrame and a:GetCurrentAnimationFrame() or 0
- local winding=a:IsCurrentAnimation("atk") and frame<14+require("shadowself/control/nettiming").Frames(c)
+ local winding=a:IsCurrentAnimation("atk") and frame<15
  local hit=(TUNING.BEEQUEEN_HIT_RANGE or 6)+(p.GetPhysicsRadius and p:GetPhysicsRadius(0) or .5)+.25
  local inside=p:GetPosition():DistSq(queen:GetPosition())<(hit+.15)^2
  local state=q.guard_escape
@@ -13,8 +13,7 @@ function G.Tick(q,queen,now)
    state={hand=c.gear:Mobile(c.snapshot) or c.gear.forced_weapon};q.guard_escape=state;c.next_move=nil
    require("shadowself/control/queendebug").Event(c,"guard_dodge_start",{queen_frame=frame,pos=require("shadowself/control/queendebug").Point(p:GetPosition())})
   end
-  local latency=c.Latency and c:Latency() or .1
-  state.untiltime=now+math.max(0,(14-frame)*(FRAMES or 1/30))+latency
+  state.untiltime=state.untiltime or now+math.max(0,(15-frame)*(FRAMES or 1/30))
   -- 与蜂后本体走位共用实际径向逃脱算法，不再在守卫环绕候选里折中躲避。
   if not state.point then
   local data=require("shadowself/control/queenattack")(c,queen,false)

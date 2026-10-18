@@ -74,7 +74,7 @@ function Boss:AttackBlocked(e)
  if self.c.brightshade_target and e~=self.c.brightshade_target then return true end
  if not e then return false end
  if (e.prefab=="rook" or e.prefab=="rook_nightmare") and (anim(e,"atk") or not (self.rooks[e] and self.rooks[e].ready)) then return true end
- if e.prefab=="mutatedbearger" then
+ if e.prefab=="mutatedbearger" and not require("shadowself/control/openings").Bear(self.c,e) then
   for _,zone in ipairs(self.c.hazards or {}) do if zone.bearger_pit and e:GetPosition():DistSq(zone.pos)<zone.radius^2 then return true end end
  end
  if e.prefab=="minotaur" and self.guardian and self.guardian.target==e and self.guardian.active and not require("shadowself/control/guardian").Stunned(e) and not self.routes:Leap(e) then return true end
@@ -426,8 +426,21 @@ function Boss:Rabbit(target)
   self.c.bridge:PauseAttack();return "support",target
  end
 end
+function Boss:HoldPosition(target)
+ local O=require("shadowself/control/openings")
+ return O.DragonDown(target) or O.Bear(self.c,target)
+end
 function Boss:Bearger(target)
  if target.prefab~="mutatedbearger" then return end
+ local open,weapon=require("shadowself/control/openings").Bear(self.c,target)
+ if open then
+  if weapon then self.c.gear.forced_weapon=weapon;self.bear_weapon=weapon end
+  self:Release();return "attack",target
+ end
+ if self.bear_weapon then
+  if self.c.gear.forced_weapon==self.bear_weapon then self.c.gear.forced_weapon=nil end
+  self.bear_weapon=nil
+ end
  local c=self.c;local p=c.player:GetPosition();local qp=target:GetPosition()
  for _,zone in ipairs(c.hazards or {}) do if zone.bearger_pit and qp:DistSq(zone.pos)<zone.radius^2 then
   local dx,dz=p.x-zone.pos.x,p.z-zone.pos.z;local d=math.sqrt(dx*dx+dz*dz)
@@ -438,7 +451,10 @@ function Boss:Bearger(target)
 end
 function Boss:Tick(target)
  local c=self.c;local p=c.player:GetPosition()
- if (target.prefab=="dragonfly" or target.prefab=="warg" or target.prefab=="mutatedwarg" or target.prefab=="claywarg" or target.prefab=="gingerbreadwarg") and require("shadowself/control/attackwindow").Tick(c,target) then return "move",target end
+ if self.bear_weapon and target.prefab~="mutatedbearger" then
+  if c.gear.forced_weapon==self.bear_weapon then c.gear.forced_weapon=nil end;self.bear_weapon=nil
+ end
+ if require("shadowself/control/openings").DragonDown(target) then self:Release();return "attack",target end
  local bear_mode,bear_target=self:Bearger(target);if bear_mode then return bear_mode,bear_target end
  local guardian_mode,guardian_target=require("shadowself/control/guardian").Tick(self,target)
  if guardian_mode then return guardian_mode,guardian_target end
@@ -473,6 +489,7 @@ local profiles={
  sharkboi={atk1={16,5},atk2={4,5},atk2_delay={1000,5},atk3={12,5},ice_summon={42,6},torpedo_pre={1000,6},torpedo_jump={1000,6},torpedo_loop={1000,6},icedive_standing_jump_pre={1000,5},icedive_jump_pre={1000,5},icedive_jump={1000,5},icedive_dig_pre={1000,5},icedive_dig_pst={4,5}}
 }
 function Boss:Dodge(target,base)
+ if self:HoldPosition(target) then return false end
  if target.prefab=="minotaur" then
   local data=require("shadowself/control/guardian").Dodge(self.c,target,base);if data~=base then return data end
  end

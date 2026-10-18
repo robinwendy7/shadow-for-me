@@ -1,4 +1,4 @@
--- 延迟预算用于提前决策，不修改实际怪物帧或人物移速。
+-- 侧方冲刺及支持动作的延迟辅助；原生走位沿用GAME_util帧计算。
 local M={}
 function M.Delay(c)
  if c and c.Latency then return c:Latency() end
@@ -6,6 +6,4 @@ function M.Delay(c)
  return math.min(.6,ping/1000+.1)
 end
 function M.Frames(c) return math.ceil(M.Delay(c)/(FRAMES or 1/30)) end
-function M.Speed(c) return math.max(1,math.min(6,c.Speed and c:Speed() or 6)) end
-function M.Remote() return TheWorld and TheWorld.ismastersim==false end
 return M

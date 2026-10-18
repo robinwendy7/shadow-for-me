@@ -96,6 +96,7 @@ function Secondary:Point(point,primary,accept)
     return not self:LaneBlocked(fallback,primary) and (not accept or accept(fallback)) and fallback or p
 end
 function Secondary:Wrap(primary,data,checktab)
+    if primary and primary.prefab=="shadowthrall_hands" then return data end
     if data and data.exclusive and primary.prefab~="bishop" and primary.prefab~="bishop_nightmare" and primary.prefab~="sharkboi" and primary.prefab~="daywalker" then return data end
     if self.c.queen_active and self.c.beequeen and self.c.beequeen.late then self.pending=nil;return data end
     self:Scan()

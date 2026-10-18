@@ -285,10 +285,10 @@ function Bridge:Coordinate(plan)
     end
     self.saved.shadowself_backstep={value=self.h.shadowself_backstep}
     self.h.shadowself_backstep=function(point,target)
-        return target and self.coordinator.secondary:Point(point,target) or point
+        local c=self.coordinator
+        if target and (c.bosses and c.bosses:HoldPosition(target) or c.mechanisms and c.mechanisms.tanking_chomp==target) then return self.player:GetPosition() end
+        return target and c.secondary:Point(point,target) or point
     end
-    self.saved.shadowself_latency_frames={value=self.h.shadowself_latency_frames}
-    self.h.shadowself_latency_frames=function() return require("shadowself/control/nettiming").Frames(self.coordinator) end
     wrap("PreTheLoop",function(old,object,...)
         old(object,...);self.coordinator:NativePulse()
         if not self.coordinator.special_active then self.coordinator.secondary:Pulse() end
@@ -299,7 +299,6 @@ function Bridge:Coordinate(plan)
         wrap(name,function(old,object,...)
             local c=self.coordinator
             if self.pause_requested then return false end
-            if require("shadowself/control/attackwindow").Blocked(c,object.ent) then return false end
             local explicit=...;local victim=(name=="CloseAndAttack" or name=="ShouldAtkWhenDodging") and type(explicit)=="table" and explicit.prefab and explicit or object.ent
             if require("shadowself/control/targetpolicy").Rook(victim) and require("shadowself/control/targetpolicy").Other(self,victim) then return false end
             if c.crabking and c.crabking:Active() and not c.crabking:Allowed(victim) then return false end

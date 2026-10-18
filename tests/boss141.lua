@@ -15,10 +15,10 @@ local bishop=ent("bishop");bishop.anim="atk2_pre"
 local mark=ent("bishop_targeting_fx",3,0);mark.dist={value=function() return 3 end}
 local foreign=ent("bishop_targeting_fx",2.8,0);foreign.rotation=90;foreign.dist={value=function() return 6 end}
 boss.entities={foreign,mark};local data=routes:Dodge(bishop,false);assert(data and data.noattack)
-local q=data:fn();assert(q:DistSq(mark.pos)>=3.2^2 and math.abs(q:DistSq(bishop.pos)-9)<.001)
+local q=data:fn();assert(q:DistSq(p.pos)>1 and math.abs(q:DistSq(bishop.pos)-9)<.001)
 assert(routes.bishops[bishop].mark.x==3,"do not borrow other bishop's mark")
-p.pos=q;assert(data:fn():DistSq(q)==0,"outside current mark holds instead of endlessly orbiting")
-mark.pos=p.pos;mark.rotation=-math.atan2(mark.pos.z,mark.pos.x)*180/math.pi;data=routes:Dodge(bishop,false);q=data:fn();assert(q:DistSq(mark.pos)>=3.2^2,"tracking mark cannot retain stale reached goal")
+p.pos=q;assert(data:fn():DistSq(q)>1,"tracking phase must keep moving, never stop at a temporary safe point")
+mark.pos=p.pos;mark.rotation=-math.atan2(mark.pos.z,mark.pos.x)*180/math.pi;data=routes:Dodge(bishop,false);q=data:fn();assert(q:DistSq(p.pos)>1)
 bishop.anim="atk2_pst";bishop.frame=1;mark.anim="reticule_pst"
 local impact=ent("bishop_charge2_fx",mark.pos.x,mark.pos.z);boss.entities={mark,impact};data=routes:Dodge(bishop,false);assert(data and not data.safe(p.pos))
 bishop.frame=21;assert(not routes:Dodge(bishop,false),"impact recovery releases dodge")

@@ -85,11 +85,11 @@ assert(#requests==1 and held.hands==ice and attacks>0,"cast phase rejects travel
 now=101;queen.anim="atk";queen.frame=0;Q:Tick()
 assert(#requests==2 and requests[2]==cane and c.gear.support_hand.phase=="escape")
 local prior=attacks
-for i=1,15 do
+for i=1,14 do
  now=101+i/30;queen.frame=i;deliver();conflicting_events();Q:Tick()
  assert(#requests==2 and attacks==prior,"escape cannot keep re-equipping ice or submit duplicate cane requests at frame "..i)
 end
-assert(moved>=15 and held.hands==cane,"equipment acknowledgement never gates escape movement")
+assert(moved>=14 and held.hands==cane,"equipment acknowledgement never gates escape movement")
 now=101.7;queen.anim="idle";c.hazards={};deliver();Q:Tick()
 assert(#requests==3 and requests[3]==ice and c.gear.support_hand.phase=="freeze")
 for i=1,10 do now=101.7+i*.05;deliver();conflicting_events();Q:Tick() end

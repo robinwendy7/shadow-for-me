@@ -334,6 +334,7 @@ do --走A部分的函数
 	--判断关键时机来执行打断攻击
 	--第一刀判断+步进判断
 	function HitAndRun:IsKeyFrame()
+        if ThePlayer.sg and ThePlayer.sg.HasStateTag and ThePlayer.sg:HasStateTag("abouttoattack") then return false end
 		local allfirst = MOD_util:GetMOption("hitandrun_allfirst", HitAndRun.allfirst)
 		if HitAndRun.guid == 0 or allfirst then
 			if HitAndRun.cannomouseatk then
@@ -654,8 +655,9 @@ do --记录玩家处于攻击状态的时间
 			ThePlayer:ListenForEvent("performaction", function(inst, data)
 				if HitAndRun.ent then
 					if not ThePlayer.shadowself_ban_performed_action then
-						if ThePlayer:HasTag("attack") then
-							--print("performed_action1")
+						local act=data and (data.action or data)
+                        if act and act.action==ACTIONS.ATTACK and ThePlayer:HasTag("attack") then
+                            -- 只有攻击的performaction可确认命中，WALKTO不能把下一刀提前取消。
 							HitAndRun.performed_action = true
 						else
 							--print("performed_action2")

@@ -238,20 +238,40 @@ function Mechanisms:Dodge(target,base)
     local c=self.c;local name=target.prefab;local a=target.AnimState
     if name=="sharkboi" then
         return require("shadowself/control/sharkroute").Dodge(c,target,base)
-    elseif name=="klaus" and anim(target,"attack_chomp") then
-        local bone=self:Item("armorskeleton");local now=GetTime();local f=frame(target)
-        local cooldown=bone and bone.components and bone.components.cooldown
-        local ready
-        if cooldown then ready=cooldown:IsCharged() else ready=bone and now>=(self.bone_ready or math.huge) end
-        local fuel=bone and bone.components and bone.components.fueled
-        local ii=bone and bone.replica and bone.replica.inventoryitem
-        local net=ii and ii.classified and ii.classified.percentused
-        if fuel and fuel:IsEmpty() or net and net:value()<=0 then ready=false end
-        if f<35 and bone and ready and not (self.bone_consumed and now-self.bone_consumed<1) then
-            if self:Equip(bone) then self.tanking_chomp=target;return false end
+    elseif name=="klaus" then
+        local chomp=anim(target,"attack_chomp");local claws=anim(target,"attack_doubleclaw");local f=frame(target)
+        local state=self.klaus_chomp
+        if chomp then
+            local now=GetTime()
+            if not state or state.target~=target or f<(state.frame or 0) then state={target=target,since=now};self.klaus_chomp=state end
+            state.frame=f
+            local bone=self:Item("armorskeleton")
+            local cooldown=bone and bone.components and bone.components.cooldown
+            local ready=cooldown and cooldown:IsCharged() or not cooldown and bone and now>=(self.bone_ready or math.huge)
+            local fuel=bone and bone.components and bone.components.fueled
+            local ii=bone and bone.replica and bone.replica.inventoryitem;local net=ii and ii.classified and ii.classified.percentused
+            if fuel and fuel:IsEmpty() or net and net:value()<=0 then ready=false end
+            if self.bone_consumed and self.bone_consumed>=state.since then state.used=true;state.armed=nil end
+            if not state.used and f<35 and ready and self:Equip(bone) then state.armed=true end
+            if state.armed and not state.used and f<=35 then self.tanking_chomp=target;return false end
+            self.tanking_chomp=nil
+        elseif claws and state and state.target==target then
+            self.tanking_chomp=nil
+            if f>28 then self.klaus_chomp=nil;return false end
+        else
+            if state and state.target==target then self.klaus_chomp=nil;self.tanking_chomp=nil end
+            return base
         end
-        -- At the bite frame, stop greed even if visual shield replication is late.
-        if self.tanking_chomp==target and (f>=35 or self.bone_consumed and now-self.bone_consumed<.4) then self.tanking_chomp=nil;return base end
+        -- 整段扑咬由这里独占：无骨甲径向躲；骨甲抵挡后径向躲二连，绝不返回推挤旧表。
+        local radius=(TUNING.KLAUS_HIT_RANGE or 3)*4/3+c.player:GetPhysicsRadius(0)+.5
+        local data={atkanim=chomp and "attack_chomp" or "attack_doubleclaw",point="target",dist=radius,update=true,noattack=true,exclusive=true}
+        data.fn=function()
+            local p=c.player:GetPosition();local q=target:GetPosition();local d=math.sqrt(p:DistSq(q))
+            if d>=radius then return p end
+            local dx,dz=p.x-q.x,p.z-q.z;if d<.01 then dx,dz,d=1,0,1 end
+            return Nav.Select(c,Vector3(q.x+dx/d*radius,0,q.z+dz/d*radius),target)
+        end
+        return data
     end
     return base
 end

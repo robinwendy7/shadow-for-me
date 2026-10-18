@@ -19,11 +19,9 @@ c.Move=function(self,point) self.moved=point end
 local Routes=require("shadowself/control/routes");local boss={c=c};local routes=Routes(boss);boss.routes=routes
 -- 疯猪自定义路线退休，原表由native_embedded核对；其它机制继续回归。
 local data,point
--- 龙蝇近身普通/暴怒攻击均强制躲避，骨甲状态不参与判断。
-local fly=ent("dragonfly");fly.anim="atk";fly.frame=0
-p.replica.inventory.GetEquippedItem=function() return {prefab="armorskeleton",components={cooldown={IsCharged=function() return true end}}} end
-for _,f in ipairs({0,7,15,18}) do fly.frame=f;data=routes:Dodge(fly,false);assert(data and data.noattack and data.dist>=5.5) end
-fly.frame=19;assert(not routes:Dodge(fly,false))
+-- 龙蝇恢复原生距离/速度/延迟计算，骨甲不替换其走位。
+local fly=ent("dragonfly");fly.anim="atk";local original={native=true}
+assert(routes:Dodge(fly,original)==original)
 -- 只使用原版明确的撞击屏障标记，不把普通物品或空中落石当柱子。
 local Guardian=require("shadowself/control/guardian");local king=ent("minotaur");local pillar=ent("pillar_ruins",6,0);pillar.radius=1;pillar.tags.charge_barrier=true
 entities={pillar};local stopped,released=0,0

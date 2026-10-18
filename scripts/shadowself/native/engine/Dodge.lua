@@ -142,7 +142,6 @@ do --关于躲避的函数
 			start_frame = math.min(ENT_util:FnOrNum(data.atk_frame_calculate, target, data.atk_start_frame,
 				stop_frame, nil, data), stop_frame)
 		end
-        if HitAndRun.shadowself_latency_frames then start_frame=math.max(0,start_frame-HitAndRun.shadowself_latency_frames()) end
 		return start_frame, stop_frame
 	end
 
