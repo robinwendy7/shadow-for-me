@@ -1,0 +1,310 @@
+diff --git a/COMBAT-0.12.5.md b/COMBAT-0.12.5.md
+new file mode 100644
+index 0000000..6b7b071
+--- /dev/null
++++ b/COMBAT-0.12.5.md
+@@ -0,0 +1,10 @@
++# 0.12.5 二阶段恢复中间点催眠；三阶段固定直线带蜂
++
++- 二阶段排箫模块恢复原0.12.1实现：守卫醒来后立即暂停输出并重新寻找覆盖蜂后及全部守卫的站位，覆盖后吹奏；不再等最近守卫进入7码。保留原版吹奏结算、实际睡眠确认、solo和最后一次排箫消耗处理。
++- 三阶段带蜂不再复用通用 Queen:Move 的18码约束，也不再到16.5码或36码边界转成切线绕行。每轮战吼固定一个远离蜂后的世界方向，冲刺期间持续直线外移；同一战吼中守卫进入膨胀冲刺不会重选方向。
++- 直线被障碍或蜂蜜阻挡时，只选择继续远离蜂后的前方小角度避让；没有向外通路则停住重评，不绕蜂后转圈。保留距原版60码脱战线6码的余量，到达脱战边缘时不继续往外送出蜂后仇恨范围。
++- 冲刺解除（守卫恢复普通形态/速度，或command3第23帧）当次更新直线折返的实现保持。普通走位、冻蜂换杖串行队列及双冰/火杖稳定选择未回退。
++
++离线验证：完整Lua 5.1回归，原版排箫回调与战吼解除时间轴联动；新增断言验证12/20/32/40码仍沿同一方向外移、障碍只向外避让、无外移通路不绕圈。并复验双法杖及延迟手持确认。
++
++此为离线模块验证，不是实机战斗验证。报告 reviews/beequeen-0.12.5-validation.txt；Git差异 reviews/beequeen-0.12.5.patch。
+diff --git a/modinfo.lua b/modinfo.lua
+index e62578a..3a6e6a7 100644
+--- a/modinfo.lua
++++ b/modinfo.lua
+@@ -1,7 +1,7 @@
+ name = "如影随形(测试版)"
+ description = "安静地跟着你的另一个自己。纯客户端本地影子与离线对话。\n仅聊天输入栏：右键拖动，回车发送。护甲槽上方可战斗接管。"
+ author = "舒晴伊子"
+-version = "0.12.4"
++version = "0.12.5"
+ api_version = 10
+ dst_compatible = true
+ client_only_mod = true
+diff --git a/reviews/beequeen-0.12.5-validation.txt b/reviews/beequeen-0.12.5-validation.txt
+new file mode 100644
+index 0000000..4cc92c5
+--- /dev/null
++++ b/reviews/beequeen-0.12.5-validation.txt
+@@ -0,0 +1,56 @@
++验证类型：完整Lua 5.1离线回归与原版游戏源码联动；非实机战斗验证。
++PASS: all Lua source compiles with Lua 5.1
++PASS: 419 assertions; 52 categories; 260 expressions; 524288 context parameters
++PASS: local actor movement, wait, lift, death, return, transition and effects cleanup
++PASS: 84 conversation cases; 89 new intents; 1110 phrase/group entries; followup and reply coverage
++PASS: 59 additional daily topics, 177 authored replies; slang normalization; existing negation/death semantics preserved
++PASS: speech follows actor, UTF8 pages, buried/pause timers and dialogue routing
++PASS: native prefab/alias/override paths, Wes silence, ghost, per-page local voice, interrupt/pause/hide/cleanup; native player talk channel untouched
++PASS: takeover consent, expiry, cancel, possession, stop/death; native combat bridge ownership/filter/settings
++PASS: native action callbacks, revoked callback, authoritative crafting and synchronized rebirth timelines
++PASS: imported zom multi-step/count parser, queue cancellation, AI Player priority decisions
++PASS: Lua 5.1 native Class/picker, imported AI initialization, hunger decision, server confirmation and cancellation: 11
++PASS: imported queue native scene callback invalidated on cancel
++PASS: autonomous 3014 entry, exclusive thread control, no health-threshold retreat and cancel
++PASS: real AI Player travel gear, synchronized weapon restoration and darkness light
++PASS: real equipment busy/late busy never blacklists; first recovered frame retries; stale travel acknowledgement releases
++PASS: actual equipment/inventory cane acknowledgement, hold while dodging near target, native exit weapon acknowledgement
++PASS: original AI group gather/evade/punish, off-target danger and focal shadow sound
++PASS: native combat hooks restored; work defense invalidates callbacks and preserves craft request
++PASS: Maxwell native CASTAOE slots, Boss/mob control, velocity sampling, pillars renewal, miss fallback, exclusions, host and cancel
++PASS: book-only range and armed native combat mode
++PASS: 16 profiles / 448 authored lines, text personality selection, commands, fixed text, frequency and save
++PASS: fresh context, recent-meal vs real hunger, negated joke, mood, silence, bounded memory and factual questions
++PASS: concurrent distinct pots before first completion; fair empty-pot rotation; powder reserved per pending base meal; exhaustion waits for all cooked/seasoned output; existing harvest, synchronized storage and cancel
++PASS: four ingredients submitted in the same call; acknowledged at 50ms response; no duplicate in-flight request; reopened storage synchronization preserved
++PASS: native chest/cooker coexistence; eight direct ingredients across two pots; one fridge open; far-container batch withdrawal; native open-source/destination checks; cancel cleanup
++PASS: repeated hits ask consent; ongoing care without forced possession or duplicate requests
++PASS: real batch bridge sends four exact native RPCs in one call; host path, closed source, revoked guard and four-slot cap
++PASS: left/right pincer -> third direction; short escape commitment avoids oscillation; third enemy and honey route checks
++PASS: rod equip, pond wait/hook/reel, ocean tension/reel/catch/recast, pause/cancel; queen first roster/last freeze/pipe, bounded straight lure, player-queen-guard formation, fixed cutback, command edge, timed return, fixed arena and honey avoidance
++PASS: battle BGM opt-out, live mixer .7/.2/0/1 gain, no restart, profile music fallback and stop
++PASS: native solo untouched; other real windup priority; group third direction/native distance; stable table; idle fallback ignored; cane chase/goto hysteresis, hit and danger suppression
++PASS: real 3014 dodge events equip cane after initial busy, preserve all 8 movement frames, restore weapon once before follow-up
++PASS: real 3014 fixed straight charge; interrupted equip/hit recovery; unsafe attack moves; surrounded exit; recovery vs active path
++PASS: actual installed game cooking tests, 11 Warly specialties, 316 registered seasoned products; jelly and dragon-chili salad ingredient solutions
++PASS: native builder replica: KnowsRecipe=false + CanLearn + accessible FOODPROCESSING permits powder; role/materialPASS: Lua 5.1 regression complete; gameplay remains untested
++/tech errors distinct; delayed tech sync, single crafting request, powder receipt and host path
++PASS: input-only chat, no transcript/history, enter-only send, right drag/save/resize; feet consent and stop retained
++PASS: local-shadow right-click -> head MBTI button -> sixteen choices, restore, timeout, possession/buried hiding and saved personality migration
++PASS: armor-slot combat button follows inventory rebuild/scale, starts/stops, and blocks ghost clicks
++PASS: grounded recipe, material deficit, carried+equipped count, recipe uses, builder conditions, item followup and execution-command isolation
++PASS: timed spore/spike defence, shark arc, bone chomp window, single blink/shell/missile drain, loot and exclusive chase/attack/manual boat phases
++PASS: walrus dogs/retreat/rush, sliding penguin sleep confirmation, charged-goat insulation/circle/bait/punish, confirmed jelly/chili refresh and non-blocking failed food
++PASS: 0.11.3 boss phase scenarios, queen colon callback, stable insulation, early bomb, vines, tentacle bait, Wonkey ownership and coast room; not live gameplay
++PASS: one antlion sidestep, fan flank, early glass-free spin, fixed lateral lunar lane, full crystal blast, leap-before-bait, early bomb, real walrus target loss and staff ATTACK
++PASS: ranged/torch early ignition, bare/regrown crystal, attached bomb registry and moving escape, wave-wide attack hold, tired/wake/vine/shell, bishop arc flank, possessed varg, bee freeze/queen pursuit and real planar/jelly weapon ranking
++PASS: bare eye vs arm regrowth, fume event/child fallback and real bomb movement ticks, exclusive queen gear owner, ten-guard long straight pull, antlion clear-side/backtracking, continuous weak-head output, bishop circle exit, fixed lunar lane and four warg variants
++PASS: real freeze animation/safe staff range, serial same-wave ghost pairs, late bomb/landing movement, weak-head follow-up ownership, close crystal flank and source-timed rabbit king charge/stuck/burrow/minions
++PASS: actual scheduler self-pause/Sleep reproduction, pure weak-head pulse, distinct ground mushroom explosives, off-target rook/kick lanes, lateral-only pair lock, inward second crystal throw, complete-swipe hold, honey exit and persistent ten-guard lure
++PASS: actual shipped ordinary-deer entry and exact frame window, struggle-pre weapon release, visual weak-head/middle recovery and actual supervisor attack/dodge/resume across mushroom growth and fuse
++PASS: antlion connected neck exit/future segment/short sidestep; idle-queen-range freeze, bee-centered orbit, attack-windup defence and immediate frozen handoff
++PASS: actual game instrument/hearing/frame30 and busy52; full-roster coverage, missing bee, confirmed sleep/solo/wake/retry/last-use; sleeping target and captured victim rejection; spicy-jelly suppression; actual native supervisor pause/resume
++PASS: freeze threat interrupts busy/cooldown and holds through impact; stage2 restored full-coverage midpoint and immediate wake repositioning; real FocusTarget/build/speed and frame23 release drive fixed straight phase3 pull past old leash, outward-only obstacle detour and immediate return/solo/rejoin cycle
++PASS: actual Gear/Travel/Queen with 300ms and 900ms delayed equip acknowledgement; repeated move/fight events cannot alternate cane/ice; one cane escape and one ice restore; movement continuous; freeze release retains ordinary cane/sword selection
++PASS: real inventory-first/equip-last enumeration with two ice/fire staffs; delayed cane restore retains exact selected entity; held/pending preference, broken/missing replacement and crystal support selection
++PASS: actual embedded engine and all support modules initialise under actual strict.lua, cached host RPC dispatch, remote RPC fallback and no external mod globals
+diff --git a/scripts/shadowself/control/queendash.lua b/scripts/shadowself/control/queendash.lua
+index bc9714f..dae0355 100644
+--- a/scripts/shadowself/control/queendash.lua
++++ b/scripts/shadowself/control/queendash.lua
+@@ -1,5 +1,6 @@
+ -- 战吼阶段：冲刺时带走守卫；冲刺解除当帧折返，不围圈等待队形。
+ local Status=require("shadowself/control/status")
++local Nav=require("shadowself/control/navigation")
+ local D={}
+ function D.Dashing(bee)
+  if Status.Sleeping(bee) or Status.Frozen(bee) then return false end
+@@ -12,7 +13,32 @@ local function enter(q,state,queen,pos,roar)
+  state.mode="pull";state.seen_dash=nil;state.wait_dash=roar
+  local qp=queen:GetPosition();local dx,dz=pos.x-qp.x,pos.z-qp.z;local d=math.sqrt(dx*dx+dz*dz)
+  if d<.01 then dx,dz,d=1,0,1 end
+- state.dir={x=dx/d,z=dz/d};state.tangent=nil;q.stage="dash_pull"
++ state.dir={x=dx/d,z=dz/d};q.stage="dash_pull"
++end
++-- 拉蜂使用固定外移直线，不复用 Queen:Move 的18码边界/切线候选。
++function D.Pull(q,state,queen,pos)
++ local c=q.c;local qp=queen:GetPosition();local dir=state.dir
++ q.travelling=true;c.bridge.chasing=true
++ if c.travel then c.travel.chasing=true;c.travel:BeginDodge(c.snapshot) end
++ local distance=math.sqrt(pos:DistSq(qp));local home=q.anchor or qp
++ local leash=math.max(4,(TUNING.BEEQUEEN_DEAGGRO_DIST or 60)-6)
++ local function forward(point)
++  return (point.x-pos.x)*dir.x+(point.z-pos.z)*dir.z>.2
++   and point:DistSq(qp)>(distance+.1)^2 and point:DistSq(home)<=leash^2
++ end
++ local straight=Vector3(pos.x+dir.x*4,0,pos.z+dir.z*4);local goal
++ if forward(straight) and Nav.Safe(c,straight,queen) then goal=straight end
++ if not goal then
++  -- 障碍只允许向原外移方向前进的小角度绕行，不选绕蜂后的圆周路线。
++  for _,angle in ipairs({15,-15,30,-30,45,-45,60,-60}) do
++   local a=angle*math.pi/180
++   local dx,dz=dir.x*math.cos(a)-dir.z*math.sin(a),dir.x*math.sin(a)+dir.z*math.cos(a)
++   local point=Vector3(pos.x+dx*4,0,pos.z+dz*4)
++   if forward(point) and Nav.Safe(c,point,queen) then goal=point;break end
++  end
++ end
++ goal=goal or Nav.Escape(c,straight,queen,forward)
++ c:Move(goal or pos,"蜂后三阶段 · 固定直线远离蜂后带蜂")
+ end
+ function D.Tick(q,queen,bees,now)
+  local c=q.c;local p=c.player;local pos=p:GetPosition();local qp=queen:GetPosition()
+@@ -29,7 +55,7 @@ function D.Tick(q,queen,bees,now)
+  state.was_roar=roar;state.was_dash=dashing
+  q:Target(queen)
+  if not awake then state.mode="solo" end
+- if awake and ((new_roar and not ending) or new_dash and not ending) then enter(q,state,queen,pos,true) end
++ if awake and ((new_roar and not ending) or new_dash and state.mode~="pull" and not ending) then enter(q,state,queen,pos,true) end
+  if state.mode=="solo" and awake and near<6 then enter(q,state,queen,pos,false) end
+  if state.mode=="pull" then
+   if dashing then state.seen_dash=true end
+@@ -37,11 +63,7 @@ function D.Tick(q,queen,bees,now)
+   if finished or not state.wait_dash and not dashing and q:Formation(queen,bees,pos) then
+    state.mode="return";q.stage="dash_return";c.next_move=nil
+   else
+-   local dir=state.dir;local distance=math.sqrt(pos:DistSq(qp))
+-   if distance>=16.5 or pos:DistSq(q.anchor)>36^2 then
+-    state.tangent=state.tangent or {x=-dir.z,z=dir.x};dir=state.tangent
+-   end
+-   q.stage="dash_pull";q:Move(Vector3(pos.x+dir.x*4,0,pos.z+dir.z*4),"蜂后三阶段 · 冲刺带走守卫",queen)
++   q.stage="dash_pull";D.Pull(q,state,queen,pos)
+    return true
+   end
+  end
+diff --git a/scripts/shadowself/control/queenflute.lua b/scripts/shadowself/control/queenflute.lua
+index 1471094..8bd7a83 100644
+--- a/scripts/shadowself/control/queenflute.lua
++++ b/scripts/shadowself/control/queenflute.lua
+@@ -12,6 +12,29 @@ function F.Covered(point,queen,bees,range)
+     for _,bee in ipairs(bees) do if point:DistSq(bee:GetPosition())>range^2 then return false end end
+     return true
+ end
++-- 覆盖圆的边界交点给出可行站位；找不到共同覆盖点时向群体中心收拢，不作长跑拉扯。
++function F.Point(c,queen,bees,range)
++    local points={queen:GetPosition()};for _,bee in ipairs(bees) do points[#points+1]=bee:GetPosition() end
++    local p=c.player:GetPosition();local best,score;local x,z=0,0
++    local function consider(q)
++        local excess=0
++        for _,v in ipairs(points) do excess=math.max(excess,math.sqrt(q:DistSq(v))-range) end
++        local value=excess*excess*1000+p:DistSq(q)
++        if not score or value<score then best,score=q,value end
++    end
++    for _,v in ipairs(points) do x=x+v.x;z=z+v.z;consider(v) end
++    consider(Vector3(x/#points,0,z/#points))
++    for i=1,#points do for j=i+1,#points do
++        local a,b=points[i],points[j];local dx,dz=b.x-a.x,b.z-a.z;local d=math.sqrt(dx*dx+dz*dz)
++        if d>.01 and d<=2*range then
++            local h=math.sqrt(math.max(0,range*range-d*d/4));local mx,mz=(a.x+b.x)/2,(a.z+b.z)/2
++            consider(Vector3(mx-dz/d*h,0,mz+dx/d*h));consider(Vector3(mx+dz/d*h,0,mz-dx/d*h))
++        end
++    end end
++    local goal=best or queen:GetPosition();local dx,dz=goal.x-p.x,goal.z-p.z;local d=math.sqrt(dx*dx+dz*dz)
++    if d>3 then goal=Vector3(p.x+dx/d*3,0,p.z+dz/d*3) end
++    return Nav.Select(c,goal,queen)
++end
+ local function release(q)
+     q:ReleaseTravel();local c=q.c;c.bridge.chasing=nil
+     if c.travel then c.travel.chasing=nil;c.travel.dodging=nil;c.travel.restore_dodge=nil end
+@@ -22,6 +45,7 @@ function F.Tick(q,queen,bees,flute,now)
+     local asleep=true
+     for _,bee in ipairs(bees) do if not Status.Sleeping(bee) then asleep=false;break end end
+     q:Target(queen)
++    if state.solo and not asleep then state.solo=nil;state.in_solo=nil;state.next_play=now end
+     if state.pending then
+         -- 发出 PLAY 不等于催眠成功；等原版第30帧结算和实际睡眠复制。
+         if asleep and Status.Sleeping(queen) then state.confirmed=true end
+@@ -33,14 +57,7 @@ function F.Tick(q,queen,bees,flute,now)
+             state.pending=nil;state.confirmed=nil;state.next_play=now+.5
+         end
+     end
+-    -- 醒蜂不代表立刻停刀：让守卫自己追近，原地等覆盖，不主动寻找中间点。
+-    local near=math.huge
+-    for _,bee in ipairs(bees) do if not Status.Sleeping(bee) and not Status.Frozen(bee) then
+-        near=math.min(near,math.sqrt(pos:DistSq(bee:GetPosition())))
+-    end end
+-    local ping=TheNet and TheNet.GetPing and TheNet:GetPing()/1000 or 0
+-    local approach=7+math.min(2,ping*6)
+-    if (asleep and (state.solo or Status.Sleeping(queen))) or near>approach then
++    if asleep and (state.solo or Status.Sleeping(queen)) then
+         state.solo=true;q.stage="strike"
+         -- 只在进入solo时交接一次；后续让原生走位自行持杖/恢复武器。
+         if not state.in_solo then release(q);state.in_solo=true end
+@@ -48,7 +65,6 @@ function F.Tick(q,queen,bees,flute,now)
+     end
+     -- 最后一次排箫消耗后仍完成已提交的催眠与单挑；醒蜂后才退回无排箫策略。
+     if not flute then q.flute_cycle=nil;q:Lure(now);return false end
+-    state.solo=nil;state.in_solo=nil
+     c.blocked=true;q.stage="flute"
+     if F.Covered(pos,queen,bees,F.Range(flute)) then
+         release(q)
+@@ -59,14 +75,8 @@ function F.Tick(q,queen,bees,flute,now)
+             else state.next_play=now+.5 end
+         end
+         c.status="蜂后 · 全员进入排箫范围，准备催眠"
+-    else
+-        -- 有守卫尚未进范围时继续压蜂后；只有贴近的真实危险才做短距离避让。
+-        local escape=Nav.Escape(c,queen:GetPosition(),queen)
+-        if escape then q:Move(escape,"蜂后 · 近蜂避让，等待其余守卫追近",queen)
+-        else
+-            c.blocked=false;q.stage="strike"
+-            return q:Strike(queen,pos,queen:GetPosition(),math.sqrt(pos:DistSq(queen:GetPosition())))
+-        end
++    elseif not pc:IsBusy() then
++        q:Move(F.Point(c,queen,bees,math.max(1,F.Range(flute)-.6)),"蜂后 · 靠近共同催眠站位",queen)
+     end
+     return true
+ end
+diff --git a/tests/combat123.lua b/tests/combat123.lua
+index 3fa82d2..7b1059d 100644
+--- a/tests/combat123.lua
++++ b/tests/combat123.lua
+@@ -99,7 +99,7 @@ busy=false;Q.flute_cycle=nil;bees[1].tags.sleeping=nil
+ for _,e in ipairs(entities) do e.anim="idle" end
+ c.enemies={queen};bees[10].pos=Vector3(26,0,0);p.pos=Vector3(0,0,8);now=9
+ local before=plays;Q:Tick()
+-assert(plays==before and Q.stage=="strike","out-of-24-range bee prevents incomplete PLAY; continue queen output instead of finding a midpoint")
++assert(c.blocked and plays==before and c.moved and Q.stage=="flute","out-of-24-range bee prevents incomplete PLAY; move toward full-coverage midpoint")
+ local F=require("shadowself/control/queenflute")
+ assert(not F.Covered(p.pos,queen,bees,15))
+ p.pos=Vector3(13,0,0);bees[1].pos=Vector3(11,0,0);now=9.3;Q:Tick();assert(plays==before+1,"covered queen and full roster permit PLAY immediately")
+diff --git a/tests/combat124.lua b/tests/combat124.lua
+index 4ba0062..8542b1e 100644
+--- a/tests/combat124.lua
++++ b/tests/combat124.lua
+@@ -58,17 +58,18 @@ assert(c.moved and c.moved:DistSq(queen.pos)>6.75^2 and #commands==fired)
+ queen.frame=14;now=1.46;c.moved=nil;Q:Tick();assert(c.moved and #commands==fired,"hold escape through impact and replication margin")
+ queen.anim="idle";busy=false;p.pos=Vector3(8,0,1);bee.pos=Vector3(6,0,1);now=1.7;c.hazards={}
+ Q:Tick();assert(not Q.guard_escape and #commands==fired+1 and commands[#commands].target==bee,"resume freezing immediately, without stale half-second support cooldown")
+--- Stage two: waking is not enough to stop output; distance triggers the next flute.
++-- Stage two restored: full coverage casts immediately; wake starts positioning, not seven-unit waiting.
+ local flute=entity("panflute");items={flute};queen.anim="idle";queen.replica.health={GetPercent=function() return .65 end}
+ local bees={};entities={queen};for i=1,10 do bees[i]=entity("beeguard",14,0);entities[#entities+1]=bees[i] end
+ c.enemies=entities;c.hazards={};p.pos=Vector3(3,0,0);c.gear.AttackRange=function() return 2 end
+ local plays=0;A.Self=function(_,item,action) if action==ACTIONS.PLAY then plays=plays+1 end;return true end
+ Q=Queen(c);c.beequeen=Q;now=3;c.moved=nil
+-Q:Tick();assert(Q.phase==2 and Q.stage=="strike" and not c.blocked and not c.moved and plays==0,"awake guards eleven units away allow continued queen output, even when all already inside flute range")
+-bees[1].pos=Vector3(9.5,0,0);now=3.2;Q:Tick();assert(plays==1 and c.blocked and Q.flute_cycle.pending,"cast when guards approach, without leaving queen to seek a center")
+--- Partial coverage still prevents a wasted flute, but no midpoint is pursued.
+-Q.flute_cycle=nil;bees[10].pos=Vector3(22,0,0);now=4;c.moved=nil
+-Q:Tick();assert(plays==1 and Q.stage=="strike" and not c.moved,"one far guard means wait/continue output, not walk to the midpoint")
++Q:Tick();assert(Q.phase==2 and Q.stage=="flute" and c.blocked and plays==1,"all inside flute range casts without waiting for seven-unit guard approach")
++queen.anim="sleep_loop";for _,guard in ipairs(bees) do guard.anim="sleep_loop" end
++now=4;Q:Tick();assert(Q.stage=="strike" and not c.blocked,"full sleep confirmation still hands back queen solo")
++queen.anim="idle";for _,guard in ipairs(bees) do guard.anim="idle" end
++bees[10].pos=Vector3(22,0,0);now=4.2;c.moved=nil
++Q:Tick();assert(plays==1 and c.blocked and Q.stage=="flute" and c.moved and c.moved.x>p.pos.x,"wake immediately moves toward common coverage instead of waiting for bees to approach")
+ -- Drive real FocusTarget changes and real command3 release timeline from installed game source.
+ TUNING.BEEGUARD_SPEED=3;TUNING.BEEGUARD_DASH_SPEED=8
+ local raw=read_source("prefabs/beeguard.lua");local a=assert(raw:find("local function FocusTarget",1,true));local finish=assert(raw:find("local function BeeSort",a,true))
+@@ -94,6 +95,20 @@ queen.replica.health.GetPercent=function() return .45 end;queen.anim="command2";
+ for _,guard in ipairs(bees) do guard.pos=Vector3(6,0,0) end
+ p.pos=Vector3(8,0,0);Q=Queen(c);c.beequeen=Q;c.hazards={};now=5;c.moved=nil
+ local before=plays;Q:Tick();assert(Q.phase==3 and Q.stage=="dash_pull" and c.blocked and c.moved.x>8 and plays==before,"roar carries boosted guards away, rather than using flute: "..tostring(Q.phase).."/"..tostring(Q.stage).."/"..tostring(c.moved and c.moved.x).."/"..tostring(c.blocked).."/"..tostring(plays).."/"..tostring(before))
++-- Beyond old 16.5/18/36-unit cutoffs the direction must remain straight away from queen.
++local locked=Q.dash_cycle.dir
++for i,x in ipairs({12,20,32,40}) do
++ p.pos=Vector3(x,0,0);for _,guard in ipairs(bees) do guard.pos=Vector3(x-2,0,0) end
++ now=5+i*.02;c.moved=nil;Q:Tick()
++ assert(Q.stage=="dash_pull" and math.abs(c.moved.x-(x+4))<.001 and math.abs(c.moved.z)<.001,"no tangent/orbit at old distance cutoff "..x)
++ assert(Q.dash_cycle.dir==locked,"one roar keeps one fixed outward direction")
++end
++-- Blocking the forward route only allows an outward detour, never a circle around queen.
++p.pos=Vector3(20,0,0);for _,guard in ipairs(bees) do guard.pos=Vector3(18,0,0) end
++local safe=c.actions.SafePoint;c.actions.SafePoint=function(_,point) return point.x<=20.01 or math.abs(point.z)>.3 end
++now=5.2;Q:Tick();assert(c.moved.x>22 and math.abs(c.moved.z)>0,"obstacle detour continues outward")
++c.actions.SafePoint=function() return false end;now=5.3;Q:Tick();assert(c.moved:DistSq(p.pos)==0,"no outward route holds instead of orbiting")
++c.actions.SafePoint=safe
+ p.pos=Vector3(12,0,0);for _,guard in ipairs(bees) do guard.pos=Vector3(14,0,0) end
+ queen.anim="command3";queen.frame=22;now=5.5;Q:Tick();assert(Q.stage=="dash_pull","do not return at sound frame19 or before actual boost release")
+ release(queen);for _,guard in ipairs(bees) do assert(guard.build=="bee_guard_build") end
+@@ -110,4 +125,4 @@ for _,guard in ipairs(bees) do guard:FocusTarget(nil) end
+ now=7.01;c.moved=nil;Q:Tick();assert(Q.stage=="dash_return" and c.moved.x<12,"observed puffy-to-normal falling edge triggers immediate return without a timeout")
+ package.loaded["shadowself/control/actions"]=savedA;require("shadowself/native").context=savedN
+ package.loaded["shadowself/control/beequeen"]=nil;package.loaded["shadowself/control/queenflute"]=nil
+-print("PASS: freeze threat interrupts busy/cooldown and holds through impact; stage2 keeps attacking until bees near/no midpoint; real FocusTarget/build/speed and frame23 release drive immediate straight phase3 return/solo/rejoin cycle")
++print("PASS: freeze threat interrupts busy/cooldown and holds through impact; stage2 restored full-coverage midpoint and immediate wake repositioning; real FocusTarget/build/speed and frame23 release drive fixed straight phase3 pull past old leash, outward-only obstacle detour and immediate return/solo/rejoin cycle")

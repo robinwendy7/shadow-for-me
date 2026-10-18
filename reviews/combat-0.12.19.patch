@@ -1,0 +1,683 @@
+diff --git a/COMBAT-0.12.19.md b/COMBAT-0.12.19.md
+new file mode 100644
+index 0000000..48b8584
+--- /dev/null
++++ b/COMBAT-0.12.19.md
+@@ -0,0 +1,21 @@
++# 0.12.19 战斗走位调整
++
++## 原因与修改
++
++- **发条主教**：本机 `SGbishop.lua` 的标记会继续追踪；`bishop_charge2_fx` 实际伤害半径为2码并计入人物体积。旧实现有起步等待、过早完成小步、多个主教标记混用的问题。现在从预备首帧开始，按联网标记的距离/朝向绑定发射者，选择同半径侧绕点；标记跟上来就继续避让，离开伤害圈后停住，落地电击结束再恢复攻击。
++- **大霜鲨**：鱼雷侧移原来每帧以人物新位置再算一段，已改为本次技能的固定世界坐标终点。冰封结束后清理技能状态；冰柱只在出土初期算伤害区，长成后只保留碰撞范围，避免躲完又被永久大圈赶走。
++- **群怪/墨荒组合**：原先攻击前只处理上次走位留下的pending威胁，漏掉新开始的侧方攻击。现在关键帧、普通帧、接近攻击和躲避反击都重新检查侧方真实攻击，正在躲避时只禁止反击，不篡改该循环捕获的目标。墨荒爪的冲刺计入扫掠通道，角的落地按2.8码加人物体积处理，翼的弹丸按本机源码的重力35、观测速度预测即将落地的位置；落地后立即解除。
++- **梦魇疯猪**：源码扑击前段0～4帧有身体接触伤害，第12帧另有前方3码范围爪击。改为预备时就确定侧向世界坐标躲避点，贯穿整次扑击；不再围绕正在前进的疯猪不断重算圆周终点，保留额外身体间距。
++- **蚁狮**：优先同一个时针，每次仅挪1.75～2.25码，距离Boss远也不放大成大圆；同一轮预备/攻击不重复挪步。只有沙刺堵住整段短路线才换边，机制避让也复用已选终点，避免每帧不断往前追加。
++- **蜂后debug**：删除设置项、采样/命中日志/计数器和启动debug字段。旧调用入口只保留无操作兼容接口，运行时不再收集或输出蜂后调试日志。现有日志文件不删除。
++
++## 验证范围
++
++- Lua 5.1 全部文件语法检查通过；48组离线回归通过。
++- 新增动态主教标记、不同发射者绑定、命中后恢复；蚁狮同方向短步；疯猪/鲨鱼固定终点；无pending侧方冲刺抢占；墨荒落地弹丸与清理；冰柱长成后的碰撞范围；debug空操作回归。
++- 原蜂后一/二/三阶段、做饭、装备切换、UI、音乐、内置自动走位初始化等离线回归保留。
++- **这不是实机/服务器验证**。客户端网络延迟、实际动画帧与怪物组合需重启游戏后复测，未声称零伤。
++
++## 文件与安装
++
++项目和客户端同步为0.12.19；原目录先完整备份。代码对比见 `reviews/combat-0.12.19.patch`。需完全退出并重新打开游戏使Lua模块重新加载。
+diff --git a/modinfo.lua b/modinfo.lua
+index ad56236..1ac1e2d 100644
+--- a/modinfo.lua
++++ b/modinfo.lua
+@@ -1,14 +1,13 @@
+ name = "如影随形(测试版)"
+ description = "安静地跟着你的另一个自己。纯客户端本地影子与离线对话。\n仅聊天输入栏：右键拖动，回车发送。护甲槽上方可战斗接管。"
+ author = "舒晴伊子"
+-version = "0.12.18"
++version = "0.12.19"
+ api_version = 10
+ dst_compatible = true
+ client_only_mod = true
+ all_clients_require_mod = false
+ server_only_mod = false
+ configuration_options = {
+-    {name="queen_debug",label="蜂后战调试日志",hover="将蜂后阶段、选敌、拉扯/返身、催眠及切装原因记录到client_log.txt。按变化记录并定时采样。",options={{description="开启",data=true},{description="关闭",data=false}},default=true},
+     {name="battle_music",label="接管战斗后燃起来",hover="接管战斗时播放所提供的雨爱BGM，停止战斗时关闭。",options={{description="是",data=true},{description="否",data=false}},default=true},
+     {name="leash", label="自主活动范围（码）", options={{description="5",data=5},{description="8",data=8},{description="10",data=10},{description="12",data=12},{description="15",data=15}}, default=15},
+     {name="frequency", label="主动对话间隔", options={{description="安静（45秒）",data=45},{description="默认（25秒）",data=25},{description="健谈（12秒）",data=12}}, default=25},
+diff --git a/modmain.lua b/modmain.lua
+index be0756c..a1f3912 100644
+--- a/modmain.lua
++++ b/modmain.lua
+@@ -2,8 +2,7 @@
+ local G = GLOBAL
+ if G.TheNet:IsDedicated() then return end
+ local QueenDebug=require("shadowself/control/queendebug")
+-QueenDebug.Configure(GetModConfigData("queen_debug")~=false)
+-G.print("[ShadowSelf] "..QueenDebug.VERSION.." loaded: embedded combat; QueenDebug="..tostring(QueenDebug.enabled))
++G.print("[ShadowSelf] "..QueenDebug.VERSION.." loaded: embedded combat")
+ require("shadowself/native").Init(MODROOT)
+ local options = {
+     leash = GetModConfigData("leash") or 15,
+diff --git a/scripts/shadowself/control/bosses.lua b/scripts/shadowself/control/bosses.lua
+index cf1cb28..fde7d98 100644
+--- a/scripts/shadowself/control/bosses.lua
++++ b/scripts/shadowself/control/bosses.lua
+@@ -316,11 +316,26 @@ function Boss:Zones(entities)
+    add(e,1.85)
+    local r=e.Transform:GetRotation()*math.pi/180
+    for step=2,8,2 do add(e,1.85,Vector3(ep.x+math.cos(r)*step,0,ep.z-math.sin(r)*step)) end
+-  elseif n=="sharkboi_icespike" or n=="sharkboi_icetunnel_fx" then add(e,3)
++  elseif n=="sharkboi_icespike" then
++    local growing=false
++    for i=1,4 do if anim(e,"spike"..i.."_pre") and frame(e)<4 then growing=true;break end end
++    add(e,growing and 3 or e:GetPhysicsRadius(.8)+self.c.player:GetPhysicsRadius(0)+.2)
++   elseif n=="shadowthrall_projectile_fx" and not anim(e,"projectile_impact") then
++    self.thrall_projectiles=self.thrall_projectiles or {}
++    local old=self.thrall_projectiles[e];local now=GetTime()
++    if old and now>old.time and now-old.time<.3 then
++     local dt=now-old.time;local vy=(ep.y-old.pos.y)/dt
++     if vy<0 then
++      local t=(vy+math.sqrt(vy*vy+70*math.max(0,ep.y)))/35
++      if t<=.4 then add(e,1+self.c.player:GetPhysicsRadius(0)+.35,Vector3(ep.x+(ep.x-old.pos.x)/dt*t,0,ep.z+(ep.z-old.pos.z)/dt*t)) end
++     end
++    end
++    self.thrall_projectiles[e]={pos=ep,time=now}
+   elseif n=="smallguard_alterguardian_projectile" and not anim(e,"mutate") then self.ghosts[#self.ghosts+1]=e;add(e,math.sqrt(TUNING.GESTALT_ATTACK_HIT_RANGE_SQ or 2)+.05)
+   end
+  end end
+  for e in pairs(self.bombs) do if not seen[e] then self.bombs[e]=nil end end
++   for e in pairs(self.thrall_projectiles or {}) do if not seen[e] then self.thrall_projectiles[e]=nil end end
+  for e in pairs(self.seen) do if not seen[e] then self.seen[e]=nil end end
+  self.zones=zones;return zones
+ end
+diff --git a/scripts/shadowself/control/combat.lua b/scripts/shadowself/control/combat.lua
+index 8162e90..56c8114 100644
+--- a/scripts/shadowself/control/combat.lua
++++ b/scripts/shadowself/control/combat.lua
+@@ -291,8 +291,8 @@ function Bridge:Coordinate(plan)
+             if c.bosses and c.bosses.AttackBlocked and c.bosses:AttackBlocked(object.ent) then return false end
+             if self.chasing then return false end
+             if c.special_active and c.blocked then return false end
++            if not c.secondary:BeforeAttack(name=="ShouldAtkWhenDodging") then return false end
+             if name=="CloseAndAttack" then
+-                if not c.secondary:BeforeAttack() then return false end
+                 if c.travel.finish_deferred then c.travel:EndDodge(c.snapshot) end
+                 c.travel:UpdateDodge(c.snapshot)
+             end
+diff --git a/scripts/shadowself/control/incoming.lua b/scripts/shadowself/control/incoming.lua
+index 77f1692..a8d11b8 100644
+--- a/scripts/shadowself/control/incoming.lua
++++ b/scripts/shadowself/control/incoming.lua
+@@ -3,16 +3,17 @@ local Nav=require("shadowself/control/navigation")
+ local M={}
+ local function anim(e,n) return e.AnimState and e.AnimState:IsCurrentAnimation(n) end
+ function M.Lane(c,e)
+- local n=e.prefab;local speed
++ local n=e.prefab;local speed;local width
+  if (n=="rook" or n=="rook_nightmare") and anim(e,"atk") then speed=16
+  elseif n=="rabbitking_aggressive" and (anim(e,"dropkick_loop") or anim(e,"dropkick_pre") and e.AnimState:GetCurrentAnimationFrame()>=6) then speed=12
+  elseif (n=="eyeofterror" or n=="twinofterror1" or n=="twinofterror2") and (anim(e,"charge_loop") or anim(e,"charge_pre") and e.AnimState:GetCurrentAnimationFrame()>=25) then speed=16
+- elseif n=="daywalker" and (anim(e,"atk3") or anim(e,"run_pre")) then speed=16
++ elseif n=="daywalker" and (anim(e,"atk3") or anim(e,"run_pre")) then speed=11;width=3+c.player:GetPhysicsRadius(0)+.6
++ elseif n=="shadowthrall_hands" and (anim(e,"run_pre") or anim(e,"run_loop")) then speed=12;width=1.8+c.player:GetPhysicsRadius(0)+.5
+  elseif n=="sharkboi" and (anim(e,"torpedo_loop") or anim(e,"torpedo_jump")) then speed=16
+  end
+  if not speed then return end
+  local r=e.Transform:GetRotation()*math.pi/180
+- return {e=e,pos=e:GetPosition(),x=math.cos(r),z=-math.sin(r),length=speed*(.65+(c.Latency and c:Latency() or .1)),width=e:GetPhysicsRadius(0)+c.player:GetPhysicsRadius(0)+(n=="rabbitking_aggressive" and 1.8 or .8)}
++ return {e=e,pos=e:GetPosition(),x=math.cos(r),z=-math.sin(r),length=speed*(.65+(c.Latency and c:Latency() or .1)),width=width or e:GetPhysicsRadius(0)+c.player:GetPhysicsRadius(0)+(n=="rabbitking_aggressive" and 1.8 or .8)}
+ end
+ function M.Risk(l,p)
+  local dx,dz=p.x-l.pos.x,p.z-l.pos.z
+diff --git a/scripts/shadowself/control/mechanisms.lua b/scripts/shadowself/control/mechanisms.lua
+index 551a2fb..522fe2f 100644
+--- a/scripts/shadowself/control/mechanisms.lua
++++ b/scripts/shadowself/control/mechanisms.lua
+@@ -71,13 +71,16 @@ end
+ function Mechanisms:Escape()
+     local c=self.c;local p=c.player:GetPosition();local danger=false
+     for _,z in ipairs(self.zones) do if p:DistSq(z.pos)<z.radius^2 then danger=true;break end end
+-    if not danger then return false end
++    if not danger then self.ant_escape=nil;return false end
+     local best,score;local original=c.hazards
+     c.hazards={};for _,z in ipairs(original or {}) do c.hazards[#c.hazards+1]=z end
+     for _,z in ipairs(self.zones) do c.hazards[#c.hazards+1]=z end
+     local target=c.h and c.h.ent
+     if target and target.prefab=="antlion" and c.bosses then
+-        c.bosses.routes:RememberAnt();best=c.bosses.routes:AntPoint(target)
++        c.bosses.routes:RememberAnt()
++        local saved=self.ant_escape
++        if saved and saved.target==target and p:DistSq(saved.point)>.35^2 and Nav.Safe(c,saved.point,target) then best=saved.point
++        else best=c.bosses.routes:AntPoint(target);self.ant_escape={target=target,point=best} end
+         c.travel:BeginDodge(c.snapshot);c:Move(best,"蚁狮 · 沿可通行圆周按序躲地刺")
+         c.hazards=original;self.escaping=true;return true
+     end
+diff --git a/scripts/shadowself/control/navigation.lua b/scripts/shadowself/control/navigation.lua
+index 57f6173..9d0d6d0 100644
+--- a/scripts/shadowself/control/navigation.lua
++++ b/scripts/shadowself/control/navigation.lua
+@@ -8,6 +8,8 @@ local function threatening(c,e)
+     return not o or not o.neutral
+ end
+ function N.Radius(e)
++    if e.prefab=="shadowthrall_hands" then return 2.8 end
++    if e.prefab=="shadowthrall_horns" and e.AnimState:IsCurrentAnimation("jump") then return 3.8 end
+     if e:HasTag("lunarthrall_plant_end") or e:HasTag("lunarthrall_plant_segment") then return 4.8 end
+     local c=e.replica and e.replica.combat
+     return (c and c.GetAttackRangeWithWeapon and c:GetAttackRangeWithWeapon() or 2)
+diff --git a/scripts/shadowself/control/queendebug.lua b/scripts/shadowself/control/queendebug.lua
+index fc71cf1..5490d98 100644
+--- a/scripts/shadowself/control/queendebug.lua
++++ b/scripts/shadowself/control/queendebug.lua
+@@ -1,125 +1,8 @@
+--- 只读蜂后诊断：写入原版client_log，不联网，不发送动作，不逐帧刷日志。
+-local M={VERSION="0.12.18",enabled=false,serial=0}
+-local function now() return GetTime and GetTime() or 0 end
+-function M.Entity(e) return e and (tostring(e.prefab or "?").."#"..tostring(e.GUID or "?")) or "none" end
+-function M.Point(v) return v and string.format("%.2f,%.2f",v.x,v.z) or "none" end
+-local function value(v)
+- if type(v)=="number" then return string.format("%.3f",v) end
+- if type(v)=="boolean" then return tostring(v) end
+- return string.format("%q",tostring(v):gsub("[%c]"," "))
+-end
+-local function line(fields)
+- local keys={};for key in pairs(fields) do keys[#keys+1]=key end;table.sort(keys)
+- local out={"[ShadowSelf][QueenDebug]"};for _,key in ipairs(keys) do out[#out+1]=key.."="..value(fields[key]) end
+- print(table.concat(out," "))
+-end
+-function M.Configure(enabled)
+- M.enabled=enabled==true
+- line({event="boot",version=M.VERSION,enabled=M.enabled})
+-end
+-function M.Start(c,queen)
+- if not M.enabled then return end
+- M.serial=M.serial+1
+- c._queen_debug={fight=M.VERSION.."-"..M.serial.."-"..math.floor(now()*1000),start=now(),last={},throttle={},counts={},window=now(),lines=0,dropped=0}
+- M.Event(c,"fight_start",{queen=M.Entity(queen),player=M.Entity(c.player)})
+-end
+-function M.Event(c,event,fields)
+- local s=M.enabled and c and c._queen_debug;if not s then return end
+- local t=now();if t-s.window>=1 then s.window=t;s.lines=0 end
+- if s.lines>=24 and event~="snapshot" and event~="fight_end" then s.dropped=s.dropped+1;return end
+- s.lines=s.lines+1
+- local out={event=event,version=M.VERSION,fight=s.fight,t=t-s.start}
+- local queen=c.beequeen;if queen then out.phase=queen.phase;out.stage=queen.stage end
+- for key,v in pairs(fields or {}) do out[key]=v end;line(out)
+-end
+-function M.Change(c,key,signature,fields)
+- local s=M.enabled and c and c._queen_debug;if not s or s.last[key]==signature then return end
+- s.last[key]=signature;M.Event(c,key,fields)
+-end
+-function M.Throttle(c,key,seconds,event,fields)
+- local s=M.enabled and c and c._queen_debug;if not s or now()<(s.throttle[key] or 0) then return end
+- s.throttle[key]=now()+seconds;M.Event(c,event,fields)
+-end
+-function M.End(c,reason)
+- if c and c._queen_debug then M.Event(c,"fight_end",{reason=reason});c._queen_debug=nil end
+-end
+-function M.Block(c,source,victim)
+- local s=M.enabled and c and c._queen_debug;if not s then return end
+- local key=source=="select" and "select_veto" or "attack_veto"
+- s.counts[key]=(s.counts[key] or 0)+1
+- if source~="select" then M.Throttle(c,"attack_veto:"..source,1,"attack_block",{source=source,target=M.Entity(victim)}) end
+-end
+-function M.Performed(c,data)
+- if not M.enabled or not c or not c._queen_debug or type(data)~="table" then return end
+- local act=data
+- if type(data.action)=="table" and data.action.action then act=data.action end
+- if act.action==ACTIONS.ATTACK then M.Event(c,"attack_performed",{target=M.Entity(act.target)}) end
+-end
+-function M.Equip(c,event,item,role,extra)
+- if not M.enabled or not c or not c._queen_debug then return end
+- local fields={item=M.Entity(item),role=role,held=M.Entity(c.player.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS))}
+- for k,v in pairs(extra or {}) do fields[k]=v end
+- M.Event(c,"equip_"..event,fields)
+-end
+-function M.Move(c,point,label)
+- local s=M.enabled and c and c._queen_debug;if not s then return end
+- s.last_move=now();s.goal=point
+- M.Throttle(c,"move:"..tostring(label),.5,"move_dispatch",{pos=M.Point(c.player:GetPosition()),goal=M.Point(point),reason=label})
+-end
+-local function animation(e)
+- local n=require("shadowself/native").Get();local util=n and n.ENT_util
+- return (util and util.GetAnimation and util:GetAnimation(e)) or "unknown"
+-end
+-function M.Hit(c,data)
+- if not M.enabled or not c or not c._queen_debug then return end
+- local queen=c.beequeen and c.beequeen.queen;local attacker=data.attacker;local p=c.player
+- local function frame(e) return e and e.AnimState and e.AnimState.GetCurrentAnimationFrame and e.AnimState:GetCurrentAnimationFrame() or -1 end
+- local state=c.beequeen and c.beequeen.flute_cycle
+- M.Event(c,"attacked",{attacker=M.Entity(attacker),damage=data.damage or -1,pos=M.Point(p:GetPosition()),
+-  player_anim=animation(p),queen_anim=queen and animation(queen) or "none",queen_frame=frame(queen),
+-  attacker_anim=attacker and animation(attacker) or "none",attacker_frame=frame(attacker),
+-  distance=queen and math.sqrt(p:GetPosition():DistSq(queen:GetPosition())) or -1,
+-  attacker_distance=attacker and math.sqrt(p:GetPosition():DistSq(attacker:GetPosition())) or -1,
+-  flute_pending=state and state.pending~=nil or false,flute_performed=state and state.performed~=nil or false,
+-  flute_elapsed=state and state.requested and now()-state.requested or -1})
+-end
+-local function sample(q)
+- local c=q.c;local s=c._queen_debug;if not s or now()<(s.next_sample or 0) then return end
+- s.next_sample=now()+.2
+- local p=c.player;local queen=q.queen;if not queen or not queen:IsValid() then return end
+- local pos=p:GetPosition();local qp=queen:GetPosition();local status=require("shadowself/control/status")
+- local guards={};local signature={};local boost,sleep,frozen,near=0,0,0,math.huge
+- for _,e in ipairs(q.debug_bees or {}) do if e:IsValid() then
+-  local mode=status.Sleeping(e) and "sleep" or status.Frozen(e) and "frozen" or require("shadowself/control/queendash").Dashing(e) and "dash" or "normal"
+-  if mode=="dash" then boost=boost+1 elseif mode=="sleep" then sleep=sleep+1 elseif mode=="frozen" then frozen=frozen+1 end
+-  local d=math.sqrt(pos:DistSq(e:GetPosition()));near=math.min(near,d)
+-  local build=e.AnimState and e.AnimState.GetBuild and e.AnimState:GetBuild() or "?"
+-  signature[#signature+1]=M.Entity(e)..":"..mode
+-  guards[#guards+1]=M.Entity(e)..":"..mode..":"..build..":"..animation(e)..":"..string.format("%.1f",d)
+- end end
+- table.sort(guards);table.sort(signature)
+- local fields={phase=q.phase,stage=q.stage,mode=q.dash_cycle and q.dash_cycle.mode or "none",target=M.Entity(c.h.ent),blocked=c.blocked==true,reason=c.status or "none"}
+- M.Change(c,"decision",table.concat({tostring(fields.phase),tostring(fields.stage),fields.mode,fields.target,tostring(fields.blocked)},"/"),fields)
+- M.Change(c,"guards",table.concat(signature,";"),{count=#guards,boosted=boost,sleeping=sleep,frozen=frozen,detail=table.concat(guards,";")})
+- local pc=p.components.playercontroller;local busy=pc:IsBusy();local hp=p.replica and p.replica.health
+- local percent=hp and hp.GetPercent and hp:GetPercent()
+- if percent and s.hp and percent<s.hp then M.Event(c,"hurt",{health=percent,delta=percent-s.hp,anim=animation(p)}) end
+- if percent then s.hp=percent end
+- if now()<(s.next_snapshot or 0) then return end;s.next_snapshot=now()+2
+- local distance=s.previous and math.sqrt(pos:DistSq(s.previous)) or 0
+- local stalled=s.previous~=nil and distance<.15 and s.goal~=nil and pos:DistSq(s.goal)>1 and s.last_move~=nil and now()-s.last_move<2.5 and not busy
+- s.previous=Vector3(pos.x,0,pos.z)
+- local seen=false;for _,e in ipairs(c.enemies or {}) do if e==queen then seen=true;break end end
+- local gear=c.gear;local pending=gear.pending;local hand=gear.support_hand
+- M.Event(c,"snapshot",{phase=q.phase,stage=q.stage,mode=fields.mode,queen=M.Entity(queen),queen_anim=animation(queen),queen_frame=queen.AnimState:GetCurrentAnimationFrame(),queen_in_scan=seen,
+-  pos=M.Point(pos),queen_pos=M.Point(qp),distance=math.sqrt(pos:DistSq(qp)),guards=#guards,boosted=boost,sleeping=sleep,frozen=frozen,nearest=near<math.huge and near or -1,
+-  target=M.Entity(c.h.ent),busy=busy,player_anim=animation(p),health=percent or -1,blocked=c.blocked==true,native=c.bridge.OwnsThread and c.bridge:OwnsThread() or false,
+-  chasing=c.bridge.chasing==true,held=M.Entity(p.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)),forced=M.Entity(gear.forced_weapon),pending=M.Entity(pending and pending.item),support=hand and hand.phase or "none",
+-  goal=M.Point(s.goal),moved=distance,stalled=stalled,select_veto=s.counts.select_veto or 0,attack_veto=s.counts.attack_veto or 0,dropped=s.dropped,reason=c.status or "none"})
+-end
+-function M.Sample(q)
+- if not M.enabled or not q or not q.c or not q.c._queen_debug then return end
+- local ok,error=pcall(sample,q)
+- if not ok then M.Throttle(q.c,"logger_error",30,"logger_error",{message=tostring(error)}) end
+-end
++-- 蜂后调试已移除。保留空接口供历史调用点使用，不采样、不计数、不打印。
++local M={VERSION="0.12.19",enabled=false}
++local function noop() end
++for _,name in ipairs({"Configure","Start","Event","Change","Throttle","Block","Performed","Equip","Move","Hit","Sample"}) do M[name]=noop end
++function M.End(c) if c then c._queen_debug=nil end end
++function M.Entity(e) return e and tostring(e.prefab or "?") or "none" end
++function M.Point() return "" end
+ return M
+diff --git a/scripts/shadowself/control/routes.lua b/scripts/shadowself/control/routes.lua
+index c1e2c09..3a53c22 100644
+--- a/scripts/shadowself/control/routes.lua
++++ b/scripts/shadowself/control/routes.lua
+@@ -32,23 +32,21 @@ function Routes:AntContext()
+  end
+  return setmetatable({hazards=hazards},{__index=c})
+ end
+--- Pick both arc directions by available continuation, with a real retreat exit.
++-- 固定时针短移，只有沙刺确实挡路才改向。
+ function Routes:AntPoint(e)
+  local c=self:AntContext();local p=c.player:GetPosition();local ep=e:GetPosition()
+  self.ant_exit=nil;self.ant_plan=nil;self.ant_clearing=nil
+  local radius=math.max(2.2,distance(p,ep));local theta=math.atan2(p.z-ep.z,p.x-ep.x)
+- local planner=require("shadowself/control/antnavigation");local best,score
+- for _,side in ipairs({1,-1}) do
+-  for _,step in ipairs({.3,.45,.6}) do
+-   local a=theta+side*step;local point=Vector3(ep.x+math.cos(a)*radius,0,ep.z+math.sin(a)*radius)
+-   if planner.Corridor(c,p,point,e) then
+-    local nextpoint=Vector3(ep.x+math.cos(a+side*.35)*radius,0,ep.z+math.sin(a+side*.35)*radius)
+-    local value=p:DistSq(point)-Nav.Clearance(c,point)*.1+(planner.Corridor(c,point,nextpoint,e) and 0 or 50)
+-    if not score or value<score then best,score=point,value end
+-   end
++ local planner=require("shadowself/control/antnavigation");local preferred=self.sides[e] or -1
++ -- 先尝试同一个时针方向的小步，长度不随离Boss的半径放大。
++ for _,side in ipairs({preferred,-preferred}) do
++  for _,length in ipairs({1.75,2,2.25}) do
++   local a=theta+side*2*math.asin(math.min(.95,length/(2*radius)))
++   local point=Vector3(ep.x+math.cos(a)*radius,0,ep.z+math.sin(a)*radius)
++   if Nav.Risk(c,point,e)==0 and planner.Corridor(c,p,point,e) then self.sides[e]=side;return point end
+   end
+  end
+- return best or Nav.Select(c,Vector3(ep.x+math.cos(theta+.4)*radius,0,ep.z+math.sin(theta+.4)*radius),e)
++ return p
+ end
+ function Routes:AntRecover()
+  self.ant_exit=nil;self.ant_plan=nil;self.ant_clearing=nil
+@@ -142,47 +140,41 @@ function Routes:Bishop(e,base)
+  self.bishops=self.bishops or {}
+  if not name then self.bishops[e]=nil;return base end
+  local state=self.bishops[e]
+- if not state or state.target~=e or name=="atk2_pre" and frame(e)<(state.frame or 0) then
+-  state={target=e,since=GetTime()-(name=="atk2_loop" and .5 or frame(e)/30)};self.bishops[e]=state
+- end
+- self.bishop=state;state.frame=frame(e)
+- local c=self.c;local latency=c.Latency and c:Latency() or .1
+- if name~="atk2_pst" and GetTime()-state.since<math.max(.1,.3-latency) then return false end
++ if not state or name=="atk2_pre" and frame(e)<(state.frame or 0) then state={};self.bishops[e]=state end
++ state.frame=frame(e);self.bishop=state
+  if name=="atk2_pst" and frame(e)>20 then return false end
+- local p=c.player:GetPosition();local ep=e:GetPosition();local mark=state.mark or p
+- local near;local rot=e.Transform:GetRotation()*math.pi/180
+- if name~="atk2_pst" then
+-  for _,v in ipairs(self.boss.entities or {}) do if v.prefab=="bishop_targeting_fx" and v:IsValid() then
+-   local vp=v:GetPosition();local side=math.abs(math.sin(rot)*(vp.x-ep.x)+math.cos(rot)*(vp.z-ep.z))
+-   local value=p:DistSq(vp)+side*side*4
+-   if p:DistSq(vp)<8^2 and (not near or value<near) then near=value;mark=vp end
+-  end end
++ local c=self.c;local p=c.player:GetPosition();local ep=e:GetPosition();local mark=state.mark or p
++ local score
++ -- dist和朝向可重建发射主教位置，防止三发条/多主教时绑到别人的标记。
++ for _,fx in ipairs(self.boss.entities or {}) do if fx.prefab=="bishop_targeting_fx" and fx:IsValid() and not anim(fx,"reticule_pst") then
++  local pos=fx:GetPosition();local r=fx.Transform:GetRotation()*math.pi/180
++  local d=fx.dist and fx.dist.value and fx.dist:value()
++  local source=d and Vector3(pos.x-math.cos(r)*d,0,pos.z+math.sin(r)*d)
++  local error=source and source:DistSq(ep) or math.abs(math.sin(r)*(pos.x-ep.x)+math.cos(r)*(pos.z-ep.z))^2
++  local value=error*100+p:DistSq(pos)
++  if error<2.5^2 and (not score or value<score) then mark=pos;score=value end
++ end end
++ if name=="atk2_pst" then
++  for _,fx in ipairs(self.boss.entities or {}) do if fx.prefab=="bishop_charge2_fx" and fx:IsValid() and fx:GetPosition():DistSq(mark)<3^2 then mark=fx:GetPosition();break end end
+  end
+  state.mark=Vector3(mark.x,0,mark.z)
+- state.radius=state.radius or math.max(2.2,distance(p,ep))
+- local safe=2+c.player:GetPhysicsRadius(0)+.5
+- local theta=math.atan2(p.z-ep.z,p.x-ep.x)
+- if not state.goal or state.goal:DistSq(mark)<safe^2 or not Nav.Safe(c,state.goal,e) then
+-  local best,score
+-  for _,side in ipairs(state.side and {state.side,-state.side} or {1,-1}) do
+-   for step=.4,2.6,.2 do
+-    local a=theta+step*side;local v=Vector3(ep.x+math.cos(a)*state.radius,0,ep.z+math.sin(a)*state.radius)
+-    if v:DistSq(mark)>=safe^2 and Nav.Safe(c,v,e) then
+-     local value=p:DistSq(v)+Nav.Risk(c,v,e)*100+(state.side and side~=state.side and 1 or 0)
+-     if not score or value<score then best,score={q=v,a=a,side=side},value end
+-     break
+-    end
++ local radius=math.max(2.2,distance(p,ep));local safe=2+c.player:GetPhysicsRadius(0)+.7
++ local function clear(v) return v:DistSq(state.mark)>=safe^2 end
++ local data={atkanim=name,point="player",dist=safe,update=true,exclusive=true,noattack=true,safe=clear}
++ data.fn=function()
++  local pos=c.player:GetPosition();local center=e:GetPosition()
++  if clear(pos) then return pos end
++  local theta=math.atan2(pos.z-center.z,pos.x-center.x)
++  local preferred=state.side or 1
++  for _,side in ipairs({preferred,-preferred}) do
++   for step=.35,2.8,.15 do
++    local a=theta+side*step;local point=Vector3(center.x+math.cos(a)*radius,0,center.z+math.sin(a)*radius)
++    if clear(point) and Nav.Safe(c,point,e) then state.side=side;return point end
+    end
+   end
+-  if best then state.goal=best.q;state.angle=best.a;state.side=best.side end
++  return Nav.Escape(c,Vector3(pos.x+safe,0,pos.z),e) or pos
+  end
+- return {atkanim=name,point="player",dist=safe,update=true,exclusive=true,noattack=true,fn=function()
+-  local pos=c.player:GetPosition();local center=e:GetPosition();local a=math.atan2(pos.z-center.z,pos.x-center.x)
+-  local delta=state.angle and (state.angle-a+math.pi)%(2*math.pi)-math.pi or 0
+-  a=a+math.max(-.55,math.min(.55,delta))
+-  local goal=Vector3(center.x+math.cos(a)*state.radius,0,center.z+math.sin(a)*state.radius)
+-  return Nav.Safe(c,goal,e) and goal or Nav.Select(c,goal,e)
+- end}
++ return data
+ end
+ function Routes:Rabbit(e,base)
+  local pre,loop=anim(e,"dropkick_pre"),anim(e,"dropkick_loop")
+@@ -203,6 +195,29 @@ function Routes:Rabbit(e,base)
+  return {atkanim=pre and "dropkick_pre" or "dropkick_loop",exclusive=true,noattack=true,point="player",dist=3,update=false,fn=function() return state.point end}
+ end
+ function Routes:Daywalker(e,base)
++ local c=self.c
++ if anim(e,"run_pre") or anim(e,"atk3") then
++  local name=anim(e,"run_pre") and "run_pre" or "atk3"
++  if name=="atk3" and frame(e)>17 then self.pounce=nil;return false end
++  local state=self.pounce
++  if not state or state.target~=e or name=="run_pre" and state.name~="run_pre" then
++   local p=c.player:GetPosition();local ep=e:GetPosition();local r=e.Transform:GetRotation()*math.pi/180
++   local nx,nz=math.sin(r),math.cos(r);local side=(p.x-ep.x)*nx+(p.z-ep.z)*nz
++   state={target=e,origin=Vector3(ep.x,0,ep.z),nx=nx,nz=nz,clear=3+c.player:GetPhysicsRadius(0)+.6}
++   local preferred=side<0 and -1 or 1
++   for _,sign in ipairs({preferred,-preferred}) do
++    local amount=math.max(0,state.clear-side*sign)
++    local point=Vector3(p.x+nx*amount*sign,0,p.z+nz*amount*sign)
++    if Nav.Safe(c,point,e) then state.point=point;break end
++   end
++   state.point=state.point or p;self.pounce=state
++  end
++  state.name=name
++  return {atkanim=name,point="player",dist=state.clear,update=false,exclusive=true,noattack=true,
++   safe=function(v) return math.abs((v.x-state.origin.x)*state.nx+(v.z-state.origin.z)*state.nz)>=state.clear-.05 end,
++   fn=function() return state.point end}
++ end
++ self.pounce=nil
+  local name,stop
+  for _,entry in ipairs({{"atk_slam_pre",1000},{"atk_slam",31},{"run_pre",1000},{"atk3",17}}) do
+   if anim(e,entry[1]) then name,stop=entry[1],entry[2];break end
+@@ -234,6 +249,9 @@ function Routes:Daywalker(e,base)
+ end
+ function Routes:Dodge(e,base)
+  local n=e.prefab
++ if n=="shadowthrall_horns" and anim(e,"jump") and frame(e)<=31 then
++  return {atkanim="jump",point="target",dist=2.8+self.c.player:GetPhysicsRadius(0)+.6,angle=0,update=true,noattack=true}
++ end
+  if n=="dragonfly" and anim(e,"atk") then
+   if frame(e)>18 then return false end
+   return {atkanim="atk",point="target",dist=(TUNING.DRAGONFLY_HIT_RANGE or 5)+self.c.player:GetPhysicsRadius(0)+.4,update=true,noattack=true}
+@@ -268,12 +286,12 @@ function Routes:Dodge(e,base)
+   for _,name in ipairs({"attack_pre","attack","cast_pre"}) do
+    if anim(e,name) and (name~="attack" or frame(e)<=3) then
+     local state=self.antlion;local f=frame(e)
+-    if not state or state.target~=e or state.name~=name or f<state.frame then
++    if not state or state.target~=e or name=="attack_pre" and (state.name~="attack_pre" or f<state.frame) then
+      state={target=e,name=name,point=self:AntPoint(e),frame=f};self.antlion=state
+     end
+-    state.frame=f
++    state.frame=f;state.name=name
+     if not state.done and not Nav.Safe(self:AntContext(),state.point,e) then state.point=self:AntPoint(e) end
+-    if self.c.player:GetPosition():DistSq(state.point)<.45^2 then
++    if self.c.player:GetPosition():DistSq(state.point)<.12^2 then
+      state.done=true
+     end
+     if state.done then return false end
+diff --git a/scripts/shadowself/control/secondary.lua b/scripts/shadowself/control/secondary.lua
+index 2045894..4389444 100644
+--- a/scripts/shadowself/control/secondary.lua
++++ b/scripts/shadowself/control/secondary.lua
+@@ -35,7 +35,10 @@ function Secondary:Danger(primary)
+     local p=self.player:GetPosition();local best,score
+     for _,e in ipairs(self.enemies) do
+         if e~=primary and self.data[e] then
+-            local risk=Nav.Radius(e)-math.sqrt(p:DistSq(e:GetPosition()))
++            local data=self.data[e]
++            local lane=require("shadowself/control/incoming").Lane(self.c,e)
++            local risk=lane and require("shadowself/control/incoming").Risk(lane,p) or Nav.Radius(e)-math.sqrt(p:DistSq(e:GetPosition()))
++            if data.safe then risk=data.safe(p) and 0 or math.max(.1,risk) end
+             if risk>0 and (not score or risk>score) then best,score=e,risk end
+         end
+     end
+@@ -92,7 +95,7 @@ function Secondary:Point(point,primary,accept)
+     return not self:LaneBlocked(fallback,primary) and (not accept or accept(fallback)) and fallback or p
+ end
+ function Secondary:Wrap(primary,data,checktab)
+-    if data and data.exclusive and primary.prefab~="bishop" and primary.prefab~="bishop_nightmare" and primary.prefab~="sharkboi" then return data end
++    if data and data.exclusive and primary.prefab~="bishop" and primary.prefab~="bishop_nightmare" and primary.prefab~="sharkboi" and primary.prefab~="daywalker" then return data end
+     if self.c.queen_active and self.c.beequeen and self.c.beequeen.late then self.pending=nil;return data end
+     self:Scan()
+     if not data then
+@@ -127,14 +130,18 @@ function Secondary:AfterDodge(captured)
+  if nearest then self:Select(nearest);return nearest end
+  return captured
+ end
+-function Secondary:BeforeAttack()
++function Secondary:BeforeAttack(check_only)
+     if self.c.queen_active and self.c.beequeen and self.c.beequeen.late then self.pending=nil;return true end
+     local preferred=self.c.brightshade_target
+     if preferred and not require("shadowself/control/plant").Weak(preferred) then self.c.brightshade_target=nil;preferred=nil end
+     if preferred and preferred:IsValid() and self.c.h.ent~=preferred then self.pending=nil;self:Select(preferred);return false end
+     local e=self.pending;self.pending=nil
+-    local danger=e and e:IsValid() and self:Danger(self.c.h.ent)
+-    if danger then self:Select(danger);return false end
++    -- 每次攻击都检查侧方真实前摇，不依赖上次走位留下的pending。
++    local danger=self:Danger(self.c.h.ent)
++    if danger then
++        if check_only then self.pending=danger else self:Select(danger) end
++        return false
++    end
+     return true
+ end
+ return Secondary
+diff --git a/scripts/shadowself/control/sharkroute.lua b/scripts/shadowself/control/sharkroute.lua
+index 698fe6b..695d306 100644
+--- a/scripts/shadowself/control/sharkroute.lua
++++ b/scripts/shadowself/control/sharkroute.lua
+@@ -32,6 +32,7 @@ function R.Dodge(c,e,base)
+  local ice_state=R.IceState(c,e)
+  local emerging=anim(e,"icedive_standing_jump_pre") or anim(e,"icedive_dig_pst") and f<4 or anim(e,"icedive_jump_pre") or anim(e,"icedive_jump") or anim(e,"icedive_dig_pre") or anim(e,"spawn") and f<20
+  local torpedo=anim(e,"torpedo_pre") or anim(e,"torpedo_jump") or anim(e,"torpedo_loop")
++ if not torpedo then c.shark_torpedo=nil end
+  if not swipe and not emerging and not torpedo and not ice then return base end
+  local name
+  for _,n in ipairs({"atk1","atk2","atk2_delay","atk3","ice_summon","torpedo_pre","torpedo_jump","torpedo_loop","icedive_standing_jump_pre","icedive_jump_pre","icedive_jump","icedive_dig_pre","icedive_dig_pst","spawn"}) do if anim(e,n) then name=n;break end end
+@@ -70,8 +71,13 @@ function R.Dodge(c,e,base)
+    local theta=math.atan2(p.z-ep.z,p.x-ep.x)
+    local rot=e.Transform:GetRotation()*math.pi/180
+    if torpedo then
+-    local side=math.sin(rot)*(p.x-ep.x)+math.cos(rot)*(p.z-ep.z);local sign=side<0 and -1 or 1
+-    return Nav.Select(c,Vector3(p.x+math.sin(rot)*radius*sign,0,p.z+math.cos(rot)*radius*sign),e)
++    local state=c.shark_torpedo
++    if not state or state.target~=e then
++     local nx,nz=math.sin(rot),math.cos(rot);local side=nx*(p.x-ep.x)+nz*(p.z-ep.z);local sign=side<0 and -1 or 1
++     local amount=math.max(0,3+c.player:GetPhysicsRadius(0)+.6-math.abs(side))
++     state={target=e,point=Nav.Select(c,Vector3(p.x+nx*amount*sign,0,p.z+nz*amount*sign),e)};c.shark_torpedo=state
++    end
++    return state.point
+    end
+    return Nav.Select(c,Vector3(ep.x+math.cos(theta)*radius,0,ep.z+math.sin(theta)*radius),e)
+   end
+diff --git a/tests/boss141.lua b/tests/boss141.lua
+new file mode 100644
+index 0000000..3d03a90
+--- /dev/null
++++ b/tests/boss141.lua
+@@ -0,0 +1,56 @@
++-- 0.12.19：攻击形状、固定落点及每次攻击的侧方检查；物理与网络为模拟。
++local now=0;GetTime=function() return now end
++Vector3=function(x,y,z) local p={x=x,y=y,z=z};function p:DistSq(q) return (self.x-q.x)^2+(self.z-q.z)^2 end;return p end
++local uid=0
++local function ent(n,x,z)
++ uid=uid+1;local e={prefab=n,GUID=uid,pos=Vector3(x or 0,0,z or 0),anim="idle",frame=0,rotation=0,replica={},components={}}
++ function e:IsValid() return true end;function e:HasTag() return false end;function e:GetPosition() return self.pos end;function e:GetPhysicsRadius() return .5 end
++ e.Transform={GetRotation=function() return e.rotation end};e.AnimState={IsCurrentAnimation=function(_,n) return e.anim==n end,GetCurrentAnimationFrame=function() return e.frame end};return e
++end
++local p=ent("wilson",3,0);local entities={};TheSim={FindEntities=function() return entities end};TheWorld={state={}}
++local c={player=p,enemies={},observed={},hazards={},actions={SafePoint=function() return true end},Latency=function() return .15 end}
++local boss={c=c,entities={}};local routes=require("shadowself/control/routes")(boss)
++-- 主教从预备首帧响应；绑定本只主教的标记，标记继续追踪时再移动，出范围后停住。
++local bishop=ent("bishop");bishop.anim="atk2_pre"
++local mark=ent("bishop_targeting_fx",3,0);mark.dist={value=function() return 3 end}
++local foreign=ent("bishop_targeting_fx",2.8,0);foreign.rotation=90;foreign.dist={value=function() return 6 end}
++boss.entities={foreign,mark};local data=routes:Dodge(bishop,false);assert(data and data.noattack)
++local q=data:fn();assert(q:DistSq(mark.pos)>=3.2^2 and math.abs(q:DistSq(bishop.pos)-9)<.001)
++assert(routes.bishops[bishop].mark.x==3,"do not borrow other bishop's mark")
++p.pos=q;assert(data:fn():DistSq(q)==0,"outside current mark holds instead of endlessly orbiting")
++mark.pos=p.pos;mark.rotation=-math.atan2(mark.pos.z,mark.pos.x)*180/math.pi;data=routes:Dodge(bishop,false);q=data:fn();assert(q:DistSq(mark.pos)>=3.2^2,"tracking mark cannot retain stale reached goal")
++bishop.anim="atk2_pst";bishop.frame=1;mark.anim="reticule_pst"
++local impact=ent("bishop_charge2_fx",mark.pos.x,mark.pos.z);boss.entities={mark,impact};data=routes:Dodge(bishop,false);assert(data and not data.safe(p.pos))
++bishop.frame=21;assert(not routes:Dodge(bishop,false),"impact recovery releases dodge")
++-- 蚁狮每轮只短移一次，同一时针；离Boss远也不能放大成大圆。
++local ant=ent("antlion");ant.anim="attack_pre";p.pos=Vector3(12,0,0)
++data=routes:Dodge(ant,false);q=data:fn();assert(q.z<0 and p.pos:DistSq(q)<=2^2,"fixed clockwise short world step")
++p.pos=q;assert(not routes:Dodge(ant,false));ant.anim="attack";ant.frame=0;assert(not routes:Dodge(ant,false),"same cast does not request another sidestep")
++ant.anim="attack_pre";ant.frame=0;data=routes:Dodge(ant,false);local q2=data:fn();assert(q2.z<q.z and p.pos:DistSq(q2)<=4)
++-- 扑击路径固定于起扑时世界坐标，怪物前进不能把躲避终点一起推走。
++local pig=ent("daywalker");pig.anim="run_pre";p.pos=Vector3(3,0,0)
++data=routes:Dodge(pig,false);q=data:fn();assert(math.abs(q.z)>=4,"clear pounce cross AND early collision, not just end hit")
++pig.pos=Vector3(2,0,0);pig.anim="atk3";pig.frame=2;local d2=routes:Dodge(pig,false);assert(d2:fn():DistSq(q)==0,"no moving orbit goal during pig flight")
++assert(d2.safe(q) and not d2.safe(Vector3(3,0,1.8)));pig.frame=18;assert(not routes:Dodge(pig,false))
++-- 鱼雷位移只能算一次；到点后不能又平移一段。
++local shark=ent("sharkboi");shark.anim="torpedo_pre";p.pos=Vector3(3,0,0)
++local Shark=require("shadowself/control/sharkroute");data=Shark.Dodge(c,shark,false);q=data:fn();p.pos=q
++shark.anim="torpedo_loop";shark.pos=Vector3(2,0,0);assert(Shark.Dodge(c,shark,false):fn():DistSq(q)==0)
++shark.anim="idle";assert(not Shark.Dodge(c,shark,false) and not c.shark_torpedo)
++-- 攻击前无pending也必须读取侧方墨荒；躲避中不偷换捕获的主目标。
++local primary=ent("shadowthrall_wings",5,0);local hand=ent("shadowthrall_hands",-3,0);hand.anim="run_loop";p.pos=Vector3(0,0,0)
++entities={primary,hand};local h={ent=primary};c.h=h;c.bridge={allowed=function() return true end,wrappers={IsAttackPre={old=function(_,e) return e==hand and {atkanim="run_loop"} or false end},PreTheLoop={old=function() end}}}
++local sec=require("shadowself/control/secondary")(c);assert(not sec.pending)
++assert(not sec:BeforeAttack(true) and h.ent==primary and sec.pending==hand,"attack-during-dodge yields without mutating captured target")
++sec.pending=nil;assert(not sec:BeforeAttack() and h.ent==hand,"fresh side rush preempts current-target attack even without pending")
++hand.anim="idle";now=1;h.ent=primary;assert(sec:BeforeAttack(),"finished attack immediately restores output, no idle crowd fleeing")
++local horns=ent("shadowthrall_horns");horns.anim="jump";horns.frame=29;assert(routes:Dodge(horns,false).dist>=3.8)
++-- 冰刺长成后不再被当3码持续爆炸，三墨荒弹丸按重力预测降落，落地后解除。
++EQUIPSLOTS=EQUIPSLOTS or {HANDS="hands",BODY="body",HEAD="head"}
++local Boss=require("shadowself/control/bosses");local B=Boss(c);local spike=ent("sharkboi_icespike",8,0);spike.anim="spike1_pre";spike.frame=0
++assert(B:Zones({spike})[1].radius==3);spike.anim="spike1";local z=B:Zones({spike});assert(z[1].radius<1.5,"grown ice is collision only")
++local shot=ent("shadowthrall_projectile_fx",0,0);shot.anim="projectile_loop";shot.pos.y=2;now=2;B:Zones({shot})
++now=2.1;shot.pos=Vector3(1,1,0);z=B:Zones({shot});assert(#z==1 and z[1].pos.x>1 and z[1].radius>=1.8)
++shot.anim="projectile_impact";assert(#B:Zones({shot})==0,"already landed projectile isn't recurring hazard")
++assert(not next(B:Zones({})));assert(not next(B.thrall_projectiles),"projectile observations clean up")
++print("PASS: 0.12.19 moving bishop marker/source/impact; short fixed-direction ant casts; world-locked pig/shark lanes; fresh off-target rush interruption; horns landing; grown ice collision; thrall projectile landing and cleanup")
+diff --git a/tests/combat117.lua b/tests/combat117.lua
+index 5a0bc16..d8c45bd 100644
+--- a/tests/combat117.lua
++++ b/tests/combat117.lua
+@@ -76,9 +76,9 @@ assert(require("shadowself/control/navigation").Radius(vine)>=4.8)
+ local turtle=entity("slurtle");c.enemies={turtle}
+ for _,name in ipairs({"hide","hide_loop","emerge"}) do turtle.anim=name;assert(b:Shell(turtle)=="support" and b:AttackBlocked(turtle)) end
+ turtle.anim="idle";assert(not b:Shell(turtle) and not b:AttackBlocked(turtle))
+--- Bishop does not orbit in early charge; one short side step later.
++-- Bishop responds from first charge frame and keeps the same melee radius.
+ local bishop=entity("bishop");bishop.anim="atk2_pre";bishop.frame=0;c.enemies={bishop};p.pos=Vector3(3,0,0);now=10
+-assert(not b:Dodge(bishop,false));now=10.5;data=b:Dodge(bishop,false)
++assert(b:Dodge(bishop,false),"begin at first charge frame");now=10.5;data=b:Dodge(bishop,false)
+ local q=data:fn();assert(math.abs(q:DistSq(bishop.pos)-p.pos:DistSq(bishop.pos))<.01,"bishop step follows same-radius arc")
+ p.pos=q;assert(math.abs(data:fn():DistSq(bishop.pos)-9)<.01,"bishop continues on the same radius")
+ -- Possessed varg flame is flanked; rear position opens attacks during breath.
+diff --git a/tests/queen_debug_removed.lua b/tests/queen_debug_removed.lua
+new file mode 100644
+index 0000000..3f5db07
+--- /dev/null
++++ b/tests/queen_debug_removed.lua
+@@ -0,0 +1,6 @@
++local D=require("shadowself/control/queendebug")
++local old=print;local count=0;print=function() count=count+1 end
++local c={};D.Configure(true)
++for _,name in ipairs({"Start","Event","Change","Throttle","Block","Performed","Equip","Move","Hit","Sample","End"}) do D[name](c) end
++assert(not D.enabled and not c._queen_debug and count==0,"retired queen debug must do no logging or tracking")
++print=old;print("PASS: queen debug disabled permanently; all legacy calls are no-ops")
+diff --git a/tests/queen_flute_recovery.lua b/tests/queen_flute_recovery.lua
+index 68deb12..318d8e0 100644
+--- a/tests/queen_flute_recovery.lua
++++ b/tests/queen_flute_recovery.lua
+@@ -118,11 +118,5 @@ local previous=plans;queen.anim="atk";queen.frame=1;p.pos=vec(4,0);tick()
+ assert(plans>previous and c.blocked,"new queen windup invalidates cached standing route immediately")
+ S.Point=original
+ print("PASS: phase2 60-tick midpoint full plans="..previous.."; new windup invalidates cache immediately; spawn blocks PLAY until animation/roster settle")
+--- 命中日志记录当下帧与距离，不再仅依赖前一条2秒采样。
+-local Debug=require("shadowself/control/queendebug");local oldPrint=print;local lines={}
+-print=function(line) lines[#lines+1]=line end;Debug.Configure(true);Debug.Start(c,queen)
+-queen.anim="atk";queen.frame=14;bee.anim="atk";bee.frame=13;Debug.Hit(c,{attacker=bee,damage=15})
+-local line=lines[#lines];assert(line:find('event="attacked"',1,true) and line:find('attacker_frame=13',1,true) and line:find('queen_frame=14',1,true) and line:find('flute_pending=false',1,true))
+-Debug.End(c,"offline_test");Debug.Configure(false);print=oldPrint
+ package.loaded["shadowself/control/actions"]=oldA;require("shadowself/native").context=oldN
+-print("PASS: phase2 unsafe queen/guard window, cast lock vs actual gear, hit and animation/incoming/movement cancellation, immediate escape, screech timing, fresh all-sleep handoff, prior equip ack, cleanup and exact-hit diagnostic")
++print("PASS: phase2 unsafe queen/guard window, cast lock vs actual gear, hit and animation/incoming/movement cancellation, immediate escape, screech timing, fresh all-sleep handoff, prior equip ack, cleanup")
+diff --git a/tests/server_combat.lua b/tests/server_combat.lua
+index 9a6cacb..b0b2ddf 100644
+--- a/tests/server_combat.lua
++++ b/tests/server_combat.lua
+@@ -69,7 +69,7 @@ goal=secondary:Point(Vector3(0,0,4),primary);assert(not secondary:LaneBlocked(go
+ -- 主教状态必须按实体保留，多只主教同时出招不能互相重置蓄力计时。
+ entities={};c.enemies={};local routes=require("shadowself/control/routes")({c=c,entities={}})
+ p.pos=Vector3(3,0,0);primary.anim="atk2_pre";primary.frame=0;bishop.anim="atk2_pre";bishop.frame=0
+-now=2;assert(not routes:Bishop(primary,false));assert(not routes:Bishop(bishop,false));now=2.3
++now=2;assert(routes:Bishop(primary,false));assert(routes:Bishop(bishop,false));now=2.3
+ local bd=routes:Bishop(primary,false);assert(bd and bd.fn,"server latency starts bishop sidestep before old0.4-second delay")
+ local bp=bd:fn();assert(math.abs(bp:DistSq(primary.pos)-9)<.001,"bishop retains close same-radius sidestep")
+ routes:Bishop(bishop,false);assert(routes.bishops[primary] and routes.bishops[bishop],"bishop plans survive off-target scans")
+diff --git a/tools/verify51.py b/tools/verify51.py
+index d4f31ee..1d6b6be 100644
+--- a/tools/verify51.py
++++ b/tools/verify51.py
+@@ -16,7 +16,7 @@ with zipfile.ZipFile(Path("D:/Steam/steamapps/common/Don't Starve Together/data/
+     runtime.globals().write_debug_fixture=lambda text:(ROOT/'reviews/queen-debug-offline-fixture.log').write_text(text,encoding='utf8')
+     runtime.globals().read_source=lambda path:archive.read('scripts/'+path).decode('utf8')
+     runtime.globals().read_3014_dodge=lambda:(ROOT/'scripts/shadowself/native/engine/Dodge.lua').read_text(encoding='utf8')
+-    suites=['offline','render_lifecycle','conversation','daily','speech','voice','control','actions_clock','merge','native_merge','coordinator','maxwell','personality','thought_cooking','batch_cooking','navigation','fishing_queen','battlemusic','secondary_travel','dodge_cane','combat103','native_food','grinding','chat_ui','knowledge','combat112','combat114','combat115','combat116','combat117','combat118','combat119','combat120','combat121','combat122','combat123','combat124','combat125','combat126','combat128','queen_debug','queen_debug_integration','queen_flute_recovery','queen_phase1','queen_phase3','server_combat','boss140','native_embedded']
++    suites=['offline','render_lifecycle','conversation','daily','speech','voice','control','actions_clock','merge','native_merge','coordinator','maxwell','personality','thought_cooking','batch_cooking','navigation','fishing_queen','battlemusic','secondary_travel','dodge_cane','combat103','native_food','grinding','chat_ui','knowledge','combat112','combat114','combat115','combat116','combat117','combat118','combat119','combat120','combat121','combat122','combat123','combat124','combat125','combat126','combat128','queen_debug_removed','queen_flute_recovery','queen_phase1','queen_phase3','server_combat','boss140','boss141','native_embedded']
+     for name in (sys.argv[2].split(',') if len(sys.argv)>2 else suites):
+         runtime.execute((ROOT/'tests'/f'{name}.lua').read_text(encoding='utf8'))
+ print('PASS: Lua 5.1 regression complete; gameplay remains untested')

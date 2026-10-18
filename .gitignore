@@ -39,3 +39,15 @@ luac.out
 *.x86_64
 *.hex
 
+
+# DST runtime animation archives must be versioned.
+!anim/*.zip
+
+# Local debug logs, caches and backups.
+*.log
+*.pyc
+__pycache__/
+reviews/queen-debug-existing/
+*.bak
+.env
+.env.*

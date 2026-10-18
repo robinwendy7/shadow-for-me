@@ -1,0 +1,313 @@
+diff --git a/COMBAT-0.12.4.md b/COMBAT-0.12.4.md
+new file mode 100644
+index 0000000..656f1d1
+--- /dev/null
++++ b/COMBAT-0.12.4.md
+@@ -0,0 +1,15 @@
++# 0.12.4 相同冰杖/火杖不再来回切换
++
++原因：actions.Items 先列背包再列装备栏。Queen:Item / Boss:Item 总取第一个相同 prefab，装备其中一根后，另一根在背包中反而排到前面，支持目标便持续更换实体。
++
++修改：
++
++- 支持物品选择缓存具体实体，不因背包格子、装备槽或遍历顺序变化改选。
++- 初次选择优先沿用同类在途装备请求或当前手持；否则按 GUID 稳定选择一根。
++- 切手杖躲避后仍恢复原来选定的冰杖/火杖。
++- 原物品丢失、移出自身库存、失效或有 broken 标签时才重新选择；不按每帧排序反复换同类物品。
++- 蜂后支持物品与晶体巨鹿火杖支持入口共用此规则；保留冰杖优先于火杖的原有策略。
++
++新增 tests/combat126.lua：使用实际 actions.Items（背包在前、装备在后）以及实际 Gear/Travel/Queen，覆盖两根冰杖、两根火杖、库存顺序反复变化、已手持/在途请求、手杖躲避后恢复同一根、损坏/移出后一次换选，以及晶体巨鹿支持物品选择。
++
++验证：完整 Lua 5.1 离线回归；此为模块联动模拟，不是实机战斗验证。报告 reviews/beequeen-0.12.4-validation.txt；Git 差异 reviews/beequeen-0.12.4.patch。
+diff --git a/modinfo.lua b/modinfo.lua
+index c1f08a2..e62578a 100644
+--- a/modinfo.lua
++++ b/modinfo.lua
+@@ -1,7 +1,7 @@
+ name = "如影随形(测试版)"
+ description = "安静地跟着你的另一个自己。纯客户端本地影子与离线对话。\n仅聊天输入栏：右键拖动，回车发送。护甲槽上方可战斗接管。"
+ author = "舒晴伊子"
+-version = "0.12.3"
++version = "0.12.4"
+ api_version = 10
+ dst_compatible = true
+ client_only_mod = true
+diff --git a/reviews/beequeen-0.12.4-validation.txt b/reviews/beequeen-0.12.4-validation.txt
+new file mode 100644
+index 0000000..20d50bd
+--- /dev/null
++++ b/reviews/beequeen-0.12.4-validation.txt
+@@ -0,0 +1,56 @@
++验证类型：Lua 5.1 完整离线回归、真实库存枚举及 Gear/Travel/Queen 联动；非实机战斗验证。
++PASS: all Lua source compiles with Lua 5.1
++PASS: 419 assertions; 52 categories; 260 expressions; 524288 context parameters
++PASS: local actor movement, wait, lift, death, return, transition and effects cleanup
++PASS: 84 conversation cases; 89 new intents; 1110 phrase/group entries; followup and reply coverage
++PASS: 59 additional daily topics, 177 authored replies; slang normalization; existing negation/death semantics preserved
++PASS: speech follows actor, UTF8 pages, buried/pause timers and dialogue routing
++PASS: native prefab/alias/override paths, Wes silence, ghost, per-page local voice, interrupt/pause/hide/cleanup; native player talk channel untouched
++PASS: takeover consent, expiry, cancel, possession, stop/death; native combat bridge ownership/filter/settings
++PASS: native action callbacks, revoked callback, authoritative crafting and synchronized rebirth timelines
++PASS: imported zom multi-step/count parser, queue cancellation, AI Player priority decisions
++PASS: Lua 5.1 native Class/picker, imported AI initialization, hunger decision, server confirmation and cancellation: 11
++PASS: imported queue native scene callback invalidated on cancel
++PASS: autonomous 3014 entry, exclusive thread control, no health-threshold retreat and cancel
++PASS: real AI Player travel gear, synchronized weapon restoration and darkness light
++PASS: real equipment busy/late busy never blacklists; first recovered frame retries; stale travel acknowledgement releases
++PASS: actual equipment/inventory cane acknowledgement, hold while dodging near target, native exit weapon acknowledgement
++PASS: original AI group gather/evade/punish, off-target danger and focal shadow sound
++PASS: native combat hooks restored; work defense invalidates callbacks and preserves craft request
++PASS: Maxwell native CASTAOE slots, Boss/mob control, velocity sampling, pillars renewal, miss fallback, exclusions, host and cancel
++PASS: book-only range and armed native combat mode
++PASS: 16 profiles / 448 authored lines, text personality selection, commands, fixed text, frequency and save
++PASS: fresh context, recent-meal vs real hunger, negated joke, mood, silence, bounded memory and factual questions
++PASS: concurrent distinct pots before first completion; fair empty-pot rotation; powder reserved per pending base meal; exhaustion waits for all cooked/seasoned output; existing harvest, synchronized storage and cancel
++PASS: four ingredients submitted in the same call; acknowledged at 50ms response; no duplicate in-flight request; reopened storage synchronization preserved
++PASS: native chest/cooker coexistence; eight direct ingredients across two pots; one fridge open; far-container batch withdrawal; native open-source/destination checks; cancel cleanup
++PASS: repeated hits ask consent; ongoing care without forced possession or duplicate requests
++PASS: real batch bridge sends four exact native RPCs in one call; host path, closed source, revoked guard and four-slot cap
++PASS: left/right pincer -> third direction; short escape commitment avoids oscillation; third enemy and honey route checks
++PASS: rod equip, pond wait/hook/reel, ocean tension/reel/catch/recast, pause/cancel; queen first roster/last freeze/pipe, bounded straight lure, player-queen-guard formation, fixed cutback, command edge, timed return, fixed arena and honey avoidance
++PASS: battle BGM opt-out, live mixer .7/.2/0/1 gain, no restart, profile music fallback and stop
++PASS: native solo untouched; other real windup priority; group third direction/native distance; stable table; idle fallback ignored; cane chase/goto hysteresis, hit and danger suppression
++PASS: real 3014 dodge events equip cane after initial busy, preserve all 8 movement frames, restore weapon once before follow-up
++PASS: real 3014 fixed straight charge; interrupted equip/hit recovery; unsafe attack moves; surrounded exit; recovery vs active path
++PASS: actual installed game cooking tests, 11 Warly specialties, 316 registered seasoned products; jelly and dragon-chili salad ingredient solutions
++PASS: native builder replica: KnowsRecipe=false + CanLearn + accessible FOODPROCESSING permits powder; role/materialPASS: Lua 5.1 regression complete; gameplay remains untested
++/tech errors distinct; delayed tech sync, single crafting request, powder receipt and host path
++PASS: input-only chat, no transcript/history, enter-only send, right drag/save/resize; feet consent and stop retained
++PASS: local-shadow right-click -> head MBTI button -> sixteen choices, restore, timeout, possession/buried hiding and saved personality migration
++PASS: armor-slot combat button follows inventory rebuild/scale, starts/stops, and blocks ghost clicks
++PASS: grounded recipe, material deficit, carried+equipped count, recipe uses, builder conditions, item followup and execution-command isolation
++PASS: timed spore/spike defence, shark arc, bone chomp window, single blink/shell/missile drain, loot and exclusive chase/attack/manual boat phases
++PASS: walrus dogs/retreat/rush, sliding penguin sleep confirmation, charged-goat insulation/circle/bait/punish, confirmed jelly/chili refresh and non-blocking failed food
++PASS: 0.11.3 boss phase scenarios, queen colon callback, stable insulation, early bomb, vines, tentacle bait, Wonkey ownership and coast room; not live gameplay
++PASS: one antlion sidestep, fan flank, early glass-free spin, fixed lateral lunar lane, full crystal blast, leap-before-bait, early bomb, real walrus target loss and staff ATTACK
++PASS: ranged/torch early ignition, bare/regrown crystal, attached bomb registry and moving escape, wave-wide attack hold, tired/wake/vine/shell, bishop arc flank, possessed varg, bee freeze/queen pursuit and real planar/jelly weapon ranking
++PASS: bare eye vs arm regrowth, fume event/child fallback and real bomb movement ticks, exclusive queen gear owner, ten-guard long straight pull, antlion clear-side/backtracking, continuous weak-head output, bishop circle exit, fixed lunar lane and four warg variants
++PASS: real freeze animation/safe staff range, serial same-wave ghost pairs, late bomb/landing movement, weak-head follow-up ownership, close crystal flank and source-timed rabbit king charge/stuck/burrow/minions
++PASS: actual scheduler self-pause/Sleep reproduction, pure weak-head pulse, distinct ground mushroom explosives, off-target rook/kick lanes, lateral-only pair lock, inward second crystal throw, complete-swipe hold, honey exit and persistent ten-guard lure
++PASS: actual shipped ordinary-deer entry and exact frame window, struggle-pre weapon release, visual weak-head/middle recovery and actual supervisor attack/dodge/resume across mushroom growth and fuse
++PASS: antlion connected neck exit/future segment/short sidestep; idle-queen-range freeze, bee-centered orbit, attack-windup defence and immediate frozen handoff
++PASS: actual game instrument/hearing/frame30 and busy52; full-roster coverage, missing bee, confirmed sleep/solo/wake/retry/last-use; sleeping target and captured victim rejection; spicy-jelly suppression; actual native supervisor pause/resume
++PASS: freeze threat interrupts busy/cooldown and holds through impact; stage2 keeps attacking until bees near/no midpoint; real FocusTarget/build/speed and frame23 release drive immediate straight phase3 return/solo/rejoin cycle
++PASS: actual Gear/Travel/Queen with 300ms and 900ms delayed equip acknowledgement; repeated move/fight events cannot alternate cane/ice; one cane escape and one ice restore; movement continuous; freeze release retains ordinary cane/sword selection
++PASS: real inventory-first/equip-last enumeration with two ice/fire staffs; delayed cane restore retains exact selected entity; held/pending preference, broken/missing replacement and crystal support selection
++PASS: actual embedded engine and all support modules initialise under actual strict.lua, cached host RPC dispatch, remote RPC fallback and no external mod globals
+diff --git a/scripts/shadowself/control/beequeen.lua b/scripts/shadowself/control/beequeen.lua
+index ce4d3f6..53b2e39 100644
+--- a/scripts/shadowself/control/beequeen.lua
++++ b/scripts/shadowself/control/beequeen.lua
+@@ -10,7 +10,9 @@ function Queen:Target(e)
+     if c.h.ent~=e then c.h.ent=e;c.bridge.wrappers.PreTheLoop.old(c.h) end
+ end
+ function Queen:Item(prefab)
+-    for _,e in ipairs(A.Items(self.c.player)) do if e.prefab==prefab then return e end end
++ self.item_choice=self.item_choice or {}
++ local p=self.c.player;local gear=self.c.gear
++ return require("shadowself/control/itemchoice").Pick(self.item_choice,prefab,A.Items(p),p.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS),gear and gear.pending)
+ end
+ -- 固定战场中心，不随着蜂后/玩家的位置不断向外漂移。
+ function Queen:Anchor(queen)
+diff --git a/scripts/shadowself/control/bosses.lua b/scripts/shadowself/control/bosses.lua
+index 057b452..80f93a5 100644
+--- a/scripts/shadowself/control/bosses.lua
++++ b/scripts/shadowself/control/bosses.lua
+@@ -9,7 +9,9 @@ local function live(e) return e and e:IsValid() and not e:HasTag("isdead") and n
+ local function dist(a,b) return math.sqrt(a:DistSq(b)) end
+ local function rawanim(e) return require("shadowself/native").Get().ENT_util:GetAnimation(e) end
+ function Boss:Item(name)
+- for _,i in ipairs(A.Items(self.c.player)) do if i.prefab==name then return i end end
++ self.item_choice=self.item_choice or {}
++ local p=self.c.player;local gear=self.c.gear
++ return require("shadowself/control/itemchoice").Pick(self.item_choice,name,A.Items(p),p.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS),gear and gear.pending)
+ end
+ function Boss:Move(q,label,target)
+  local c=self.c;c.bridge:PauseAttack();c.travel:BeginDodge(c.snapshot)
+diff --git a/scripts/shadowself/control/itemchoice.lua b/scripts/shadowself/control/itemchoice.lua
+new file mode 100644
+index 0000000..8dff7eb
+--- /dev/null
++++ b/scripts/shadowself/control/itemchoice.lua
+@@ -0,0 +1,17 @@
++-- 同类支持物品按实体固定选择，库存/手持槽重新排列不能改变已选目标。
++local M={}
++function M.Pick(cache,name,items,hand,pending)
++ local candidates={};local first
++ for _,item in ipairs(items) do
++  if item.prefab==name and item:IsValid() and not item:HasTag("broken") then
++   candidates[item]=true
++   if not first or (item.GUID or math.huge)<(first.GUID or math.huge) then first=item end
++  end
++ end
++ local chosen=cache[name]
++ if not candidates[chosen] then
++  chosen=pending and candidates[pending.item] and pending.item or candidates[hand] and hand or first
++ end
++ cache[name]=chosen;return chosen
++end
++return M
+diff --git a/tests/combat126.lua b/tests/combat126.lua
+new file mode 100644
+index 0000000..a335ab2
+--- /dev/null
++++ b/tests/combat126.lua
+@@ -0,0 +1,145 @@
++local savedA=package.loaded["shadowself/control/actions"]
++local savedN=require("shadowself/native").context
++local now=0;GetTime=function() return now end;FRAMES=1/30
++EQUIPSLOTS={HANDS="hands",HEAD="head",BODY="body"};ACTIONS={ATTACK={},EQUIP={},PICKUP={},CHOP={},PLAY={}}
++TUNING={TOADSTOOL_SPOREBOMB_TIMER=3.5,TOADSTOOL_SPORECLOUD_RADIUS=3.5,TENTACLE_STOPATTACK_DIST=4}
++Vector3=function(x,y,z) local p={x=x,y=y,z=z};function p:DistSq(q) return (self.x-q.x)^2+(self.z-q.z)^2 end;return p end
++local guid=0
++local function entity(name,x,z)
++ guid=guid+1;local e={prefab=name,GUID=guid,pos=Vector3(x or 0,0,z or 0),frame=0,tags={},replica={},components={},entity={}}
++ function e:IsValid() return true end;function e:HasTag(t) return self.tags[t] or false end
++ function e:GetPosition() return self.pos end;function e:GetPhysicsRadius() return .5 end
++ e.AnimState={IsCurrentAnimation=function(_,n) return e.anim==n end,GetCurrentAnimationFrame=function() return e.frame end}
++ e.Transform={GetRotation=function() return 0 end};e.entity.GetParent=function() return e.parent end;return e
++end
++local p=entity("wilson",2,0);local held={};local items={};local commands={};local entities={}
++p.replica.inventory={GetEquippedItem=function(_,slot) return held[slot] end,DropItemFromInvTile=function(_,item) commands[#commands+1]={drop=item} end}
++p.replica.combat={};p.components.playercontroller={IsBusy=function() return false end}
++ThePlayer=p;TheWorld={state={}};TheSim={FindEntities=function() return entities end}
++local A={Items=function() return items end,Self=function(_,item,action) held.hands=item;commands[#commands+1]={item=item,action=action};return true end,
++ Attack=function(_,target) commands[#commands+1]={target=target,action=ACTIONS.ATTACK};return true end,
++ Scene=function(_,target,action) commands[#commands+1]={target=target,action=action};return true end}
++package.loaded["shadowself/control/actions"]=A
++require("shadowself/native").context={ENT_util={GetAnimation=function(_,e) return e.anim end}}
++local pauses=0;local stop=0
++local c={player=p,enemies={},observed={},hazards={},snapshot={},gear={},h={IsHitingFrame=function() return p.frame>=8 end},
++ bridge={PauseAttack=function() pauses=pauses+1 end,allowed=function() return true end},
++ actions={SafePoint=function() return true end,Stop=function() stop=stop+1 end},
++ travel={BeginDodge=function() end,EndDodge=function() end},Move=function(self,q,label) self.moved=q;self.status=label end}
++c.mechanisms={Equip=function(_,item) held.hands=item;return true end}
++package.loaded["shadowself/control/bosses"]=nil
++local Boss=require("shadowself/control/bosses");local b=Boss(c);c.bosses=b
++c.Latency=function() return .1 end;c.Speed=function() return 6 end
++
++
++
++-- Real Gear + real Travel + real Queen, with delayed authoritative hand-slot acknowledgements.
++require("shadowself/legacy/combat_equipment");local R=require("shadowself/legacy/registry")
++local function equipment(name,speed)
++ local item=entity(name);item.tags.weapon=true
++ item.replica.equippable={EquipSlot=function() return EQUIPSLOTS.HANDS end,IsRestricted=function() return false end}
++ item.replica.inventoryitem={GetWalkSpeedMult=function() return speed or 1 end,AttackRange=function() return name=="icestaff" and 8 or 0 end}
++ return item
++end
++local cane,ice,sword=equipment("cane",1.25),equipment("icestaff"),equipment("nightsword")
++local twin=equipment("icestaff")
++items={ice,twin,cane,sword};held.hands=cane
++-- Real actions.Items puts inventory before equips; equipping one staff moves the other to the front.
++local nativeItems=assert(loadfile("scripts/shadowself/control/actions.lua"))().Items
++p.replica.inventory.GetItems=function()
++ local out={};for _,item in ipairs(items) do if item~=held.hands then out[#out+1]=item end end;return out
++end
++p.replica.inventory.GetEquips=function() return {hands=held.hands} end
++p.replica.inventory.GetOverflowContainer=function() return nil end
++A.Items=nativeItems
++assert(A.Items(p)[1]==ice)
++local inflight;local delay=.3;local requests={};local attacks=0;local moved=0
++c.owner={perception={Inventory=function() return A.Items(p) end}}
++c.roles={CanRunForm=function() return false end,NaturalWeapon=function() return false end}
++c.actions={SafePoint=function() return true end,Stop=function() end,FindAction=function(_,action,target,item) return {item=item} end,
++ Execute=function(_,action)
++  assert(not inflight,"never submit a second equip before the first authoritative hand acknowledgement")
++  requests[#requests+1]=action.item;inflight={item=action.item,due=now+delay};return true
++ end}
++c.gear=R.CombatEquipment(c);c.travel=require("shadowself/control/travel")(p,c.gear)
++c.Move=function(self,point,label) self.blocked=true;self.moved=point;self.status=label;moved=moved+1 end
++p.replica.combat.GetAttackRangeWithWeapon=function() return held.hands==ice and 8 or 2 end
++A.Self=function(_,item,action) assert(action~=ACTIONS.EQUIP,"queen cannot bypass Gear with direct EQUIP");return true end
++A.Attack=function(_,victim) assert((held.hands==ice or held.hands==twin) and victim.prefab=="beeguard");attacks=attacks+1;return true end
++package.loaded["shadowself/control/beequeen"]=nil
++local queen=entity("beequeen");local bee=entity("beeguard",6,0)
++c.enemies={queen,bee};c.bridge.wrappers={PreTheLoop={old=function() end}};p.pos=Vector3(4,0,2)
++local Q=require("shadowself/control/beequeen")(c);c.beequeen=Q;now=100
++local function deliver()
++ if inflight and now>=inflight.due-.0001 then held.hands=inflight.item;inflight=nil end
++end
++local function conflicting_events()
++ -- Original walk_hands/fight callbacks and repeated move/attack retries used to fight the direct ice EQUIP.
++ c.travel:BeginDodge(c.snapshot);c.travel:UpdateDodge(c.snapshot);c.travel:EndDodge(c.snapshot)
++ c.gear:Swap("move",c.snapshot);c.gear:Swap("attack",c.snapshot)
++end
++Q:Tick();assert(#requests==1 and requests[1]==ice and c.gear.pending)
++for i=1,12 do now=100+i*.05;deliver();conflicting_events();Q:Tick() end
++assert(#requests==1 and held.hands==ice and attacks>0,"cast phase rejects travel cane requests, including in-flight role changes")
++-- A real queen windup owns cane for its entire escape, despite fight events.
++now=101;queen.anim="atk";queen.frame=0;Q:Tick()
++assert(#requests==2 and requests[2]==cane and c.gear.support_hand.phase=="escape")
++local prior=attacks
++for i=1,15 do
++ now=101+i/30;queen.frame=i;deliver();conflicting_events();Q:Tick()
++ assert(#requests==2 and attacks==prior,"escape cannot keep re-equipping ice or submit duplicate cane requests at frame "..i)
++end
++assert(moved>=15 and held.hands==cane,"equipment acknowledgement never gates escape movement")
++now=101.7;queen.anim="idle";c.hazards={};deliver();Q:Tick()
++assert(#requests==3 and requests[3]==ice and c.gear.support_hand.phase=="freeze")
++for i=1,10 do now=101.7+i*.05;deliver();conflicting_events();Q:Tick() end
++assert(#requests==3 and held.hands==ice and attacks>prior,"exactly one ice restoration and then freezing resumes")
++-- Late cane acknowledgement crosses the phase boundary: wait for it, then restore ice once.
++delay=.9;now=103;queen.anim="atk";queen.frame=0;Q:Tick();assert(#requests==4 and requests[4]==cane)
++now=103.65;queen.anim="idle";c.hazards={};deliver();Q:Tick();conflicting_events()
++assert(#requests==4 and c.gear.pending.item==cane and c.gear.support_hand.item==ice,"new phase must not cancel an unacknowledged cane and issue a conflicting ice EQUIP")
++now=103.91;deliver();Q:Tick();assert(#requests==5 and requests[5]==ice)
++for i=1,21 do now=103.91+i*.05;deliver();conflicting_events();Q:Tick() end
++assert(#requests==5 and held.hands==ice and not c.gear.pending,"delayed packets settle without endless alternation")
++
++-- Removing/breaking the selected copy switches exactly once to the other copy.
++items={twin,cane,sword};held.hands=cane;now=107;Q:Tick()
++assert(Q.item_choice.icestaff==twin and requests[#requests]==twin)
++now=108;deliver();Q:Tick();local count=#requests
++for i=1,20 do now=108+i*.05;Q:Tick() end
++assert(#requests==count and held.hands==twin,"replacement copy stays selected")
++-- Same issue for firestaff: use fresh copies and begin already holding the second one.
++bee.anim="idle";items={cane,sword};held.hands=cane;Q:Tick()
++local fire1,fire2=equipment("firestaff"),equipment("firestaff")
++items={fire1,fire2,cane,sword};held.hands=fire2
++A.Attack=function(_,victim) assert(held.hands==fire2 or held.hands==fire1);attacks=attacks+1;return true end
++p.replica.combat.GetAttackRangeWithWeapon=function() return (held.hands==fire1 or held.hands==fire2) and 8 or 2 end
++now=110;Q:Tick();assert(Q.item_choice.firestaff==fire2,"initial same-prefab choice prefers the already-held staff over inventory-first copy")
++count=#requests
++for i=1,40 do
++ now=110+i*.05
++ -- Simulate slot-order changes while carrying two copies.
++ if i%2==0 then items={fire2,cane,fire1,sword} else items={fire1,sword,fire2,cane} end
++ Q:Tick()
++end
++assert(#requests==count and held.hands==fire2,"two firestaff copies cannot alternate across actual inventory/equip iteration")
++-- Staff choice persists across cane escape, including delayed restoration.
++queen.anim="atk";queen.frame=0;now=113;Q:Tick();assert(requests[#requests]==cane)
++now=114;deliver();queen.anim="idle";c.hazards={};Q:Tick();assert(requests[#requests]==fire2,"cane escape restores the exact selected firestaff")
++now=115;deliver();Q:Tick()
++-- Broken selected staff is replaced, then remains stable.
++fire2.tags.broken=true;now=116;Q:Tick();assert(Q.item_choice.firestaff==fire1 and requests[#requests]==fire1)
++now=117;deliver();Q:Tick();count=#requests
++for i=1,20 do now=117+i*.05;Q:Tick() end
++assert(#requests==count and held.hands==fire1)
++-- Crystal-deer ignition uses the same stable selection rather than repeating the mistake.
++local boss=require("shadowself/control/bosses")(c);fire2.tags.broken=nil;held.hands=fire2
++assert(boss:Item("firestaff")==fire2)
++held.hands=cane;items={fire1,fire2,cane,sword};assert(boss:Item("firestaff")==fire2)
++items={fire1,cane,sword};assert(boss:Item("firestaff")==fire1)
++-- Pending choice is preferred when neither selected nor held and order changes before acknowledgement.
++local Pick=require("shadowself/control/itemchoice").Pick
++assert(Pick({},"firestaff",{fire1,fire2},cane,{item=fire2})==fire2)
++package.loaded["shadowself/control/actions"]=savedA;require("shadowself/native").context=savedN
++package.loaded["shadowself/control/beequeen"]=nil
++print("PASS: real inventory-first/equip-last enumeration with two ice/fire staffs; delayed cane restore retains exact selected entity; held/pending preference, broken/missing replacement and crystal support selection")
+diff --git a/tools/verify51.py b/tools/verify51.py
+index 988589d..0c0de34 100644
+--- a/tools/verify51.py
++++ b/tools/verify51.py
+@@ -14,7 +14,7 @@ print('PASS: all Lua source compiles with Lua 5.1',flush=True)
+ with zipfile.ZipFile(Path("D:/Steam/steamapps/common/Don't Starve Together/data/databundles/scripts.zip")) as archive:
+     runtime.globals().read_source=lambda path:archive.read('scripts/'+path).decode('utf8')
+     runtime.globals().read_3014_dodge=lambda:(ROOT/'scripts/shadowself/native/engine/Dodge.lua').read_text(encoding='utf8')
+-    suites=['offline','render_lifecycle','conversation','daily','speech','voice','control','actions_clock','merge','native_merge','coordinator','maxwell','personality','thought_cooking','batch_cooking','navigation','fishing_queen','battlemusic','secondary_travel','dodge_cane','combat103','native_food','grinding','chat_ui','knowledge','combat112','combat114','combat115','combat116','combat117','combat118','combat119','combat120','combat121','combat122','combat123','combat124','combat125','native_embedded']
++    suites=['offline','render_lifecycle','conversation','daily','speech','voice','control','actions_clock','merge','native_merge','coordinator','maxwell','personality','thought_cooking','batch_cooking','navigation','fishing_queen','battlemusic','secondary_travel','dodge_cane','combat103','native_food','grinding','chat_ui','knowledge','combat112','combat114','combat115','combat116','combat117','combat118','combat119','combat120','combat121','combat122','combat123','combat124','combat125','combat126','native_embedded']
+     for name in (sys.argv[2].split(',') if len(sys.argv)>2 else suites):
+         runtime.execute((ROOT/'tests'/f'{name}.lua').read_text(encoding='utf8'))
+ print('PASS: Lua 5.1 regression complete; gameplay remains untested')

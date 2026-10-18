@@ -1,0 +1,5 @@
+0.10.10 offline verification
+Full verify51 regression passed; all Lua compiles with Lua 5.1.
+Queen tests: straight pull instead of orbit; guard between queen and player is not formed; queen overtakes guard -> player/queen/guard order opens strike without nine-unit spread; sleeping guard near player permits output; awake guard reaching player restarts lure; cutback direction fixed away from guards. Existing first roster/freeze/panflute/bounds/command timing/honey tests retained.
+Secondary module explicitly bypasses target selection, aim wrapping and pending follow-up during queen strategy. Queen movement borrows cane and output restores weapon; bridge incidental fight event cannot interrupt queen travel cane.
+No live gameplay test performed. Full DST restart required.

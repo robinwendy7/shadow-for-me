@@ -1,0 +1,967 @@
+diff --git a/COMBAT-0.12.7.md b/COMBAT-0.12.7.md
+new file mode 100644
+index 0000000..c38c0bb
+--- /dev/null
++++ b/COMBAT-0.12.7.md
+@@ -0,0 +1,7 @@
++# 0.12.7 蜂后战可观测调试
++
++增加默认开启的蜂后战调试日志与本地提取/分析工具。覆盖阶段、选敌、冲刺起止、拉扯路线、返身、催眠、受击、攻击入口/执行、换装请求/确认/超时；按变化及两秒快照输出，限频防止逐帧刷屏，停止接管后清理。
++
++修正旧启动提示固定显示0.11.9，改为准确诊断版本0.12.7。本次不修改战斗策略。
++
++使用与字段解释见DEBUG-QUEEN.md。完整验证见reviews/beequeen-0.12.7-validation.txt，Git差异见reviews/beequeen-0.12.7.patch。现有0.12.6实机日志缺少决策埋点，需重启并复现后进一步分析。
+diff --git a/DEBUG-QUEEN.md b/DEBUG-QUEEN.md
+new file mode 100644
+index 0000000..fef2610
+--- /dev/null
++++ b/DEBUG-QUEEN.md
+@@ -0,0 +1,39 @@
++# 蜂后战调试（0.12.7）
++
++Mod设置新增“蜂后战调试日志”，默认开启。只在本地原版 client_log 中记录，不发聊天、不联网、不增加战斗动作。
++
++## 复现
++
++1. 重启游戏，加载0.12.7。日志应出现 `[ShadowSelf][QueenDebug] ... event="boot" ... version="0.12.7" enabled=true`。
++2. 接管打一轮蜂后，在卡住、乱切杖、带蜂/返身不对等问题发生后，再等数秒并停止接管。停止会记录fight_end。
++3. 告诉Codex“已经复现，读蜂后日志”，可直接读取这台电脑的 `D:\Documents\Klei\DoNotStarveTogether\client_log.txt`，无需上传。
++
++## 记录内容
++
++- `decision`：阶段、策略子状态、当前目标、是否暂停攻击及中文原因。
++- `guards`：每只已感知守卫的实体标识、普通/冲刺/睡眠/冻结、build、动画、距玩家距离。
++- `snapshot`：每两秒的角色/蜂后位置、蜂后动画帧与距离、扫描里有无蜂后、守卫统计、目标、忙碌状态、实际手持、强制武器、在途换装、走A线程、移动落点与进度。
++- `dash_start / dash_end / dash_route / queen_solo`：冲刺拉扯与返身触发依据、固定方向、直线/避障/受阻及距离边界。
++- `guard_dodge_start / guard_dodge_end`：冻蜂期间躲蜂后攻击的开始/结束帧。
++- `equip_request / equip_ack / equip_timeout / equip_cancel_role`：具体物品prefab#GUID、角色、实际手持和确认耗时，便于定位双法杖交替或两套控制争抢。
++- `flute_request / flute_confirmed / flute_timeout / flute_rejected`：排箫请求、全员睡眠确认或失败。
++- `attack_dispatch` 只是原生攻击入口调用，不代表服务器已执行/命中；`attack_performed` 是客户端可观察到的原版执行事件（不同客户端/主机可能可见性不同）。`attack_block` 是被禁止的旧目标补刀；正常的选敌排除只累计到select_veto，不逐只刷屏。
++- `hurt` 记录观察到的血量下降；能接收到原版attacked事件时，另记攻击者与伤害。
++
++状态按变化记录，采样间隔0.2秒、快照2秒；每场战斗普通事件每秒最多24条，超过计入dropped，快照和结束记录仍保留。stalled只是“有远处移动目标、位置未推进且不忙”的线索，不自动改动AI，不能单独证明死锁。调试本身不选择目标、不换装备、不移动人物。
++
++## 提取与分析
++
++`tools/read_queen_debug.py` 自动从Windows实际文档目录找日志，默认提取最近一场蜂后战，输出到 `reviews/queen-debug-latest/`：
++
++- queen-debug.log：仅蜂后诊断行。
++- queen-debug.json：事件统计、决策时间线、换装、快照与检查项。
++- queen-debug.md：中文可读报告。
++
++运行：`python -X utf8 tools/read_queen_debug.py`。可用 `--log 路径` 指定日志、`--out 路径` 指定报告位置，`--all` 提取全部诊断场次。自动检查三阶段守卫攻击请求、同类物品A→B→A、换装/催眠超时、移动无进度和诊断器错误。未命中检查项不等于实战正确，仍应看具体时间线。
++
++## 现有证据与验证
++
++安装前实际客户端日志最后加载0.12.6，只有旧启动提示和普通事件，没有QueenDebug决策轨迹；因此不能用它倒推出此前战斗问题的具体原因。启动提示原来固定写0.11.9，现已与诊断版本统一为0.12.7。
++
++完整Lua 5.1回归、日志开启时真实原生走位/监督/扫描联动回归，以及8项Python解析测试通过。`queen-debug-offline-*.log` 明确为离线测试样本，不是实机战斗记录。需要按上面的步骤生成新版实机日志后，才能对具体战斗失败作出日志结论。
+diff --git a/modinfo.lua b/modinfo.lua
+index 04632dc..4c4ee95 100644
+--- a/modinfo.lua
++++ b/modinfo.lua
+@@ -1,13 +1,14 @@
+ name = "如影随形(测试版)"
+ description = "安静地跟着你的另一个自己。纯客户端本地影子与离线对话。\n仅聊天输入栏：右键拖动，回车发送。护甲槽上方可战斗接管。"
+ author = "舒晴伊子"
+-version = "0.12.6"
++version = "0.12.7"
+ api_version = 10
+ dst_compatible = true
+ client_only_mod = true
+ all_clients_require_mod = false
+ server_only_mod = false
+ configuration_options = {
++    {name="queen_debug",label="蜂后战调试日志",hover="将蜂后阶段、选敌、拉扯/返身、催眠及切装原因记录到client_log.txt。按变化记录并定时采样。",options={{description="开启",data=true},{description="关闭",data=false}},default=true},
+     {name="battle_music",label="接管战斗后燃起来",hover="接管战斗时播放所提供的雨爱BGM，停止战斗时关闭。",options={{description="是",data=true},{description="否",data=false}},default=true},
+     {name="leash", label="自主活动范围（码）", options={{description="5",data=5},{description="8",data=8},{description="10",data=10},{description="12",data=12},{description="15",data=15}}, default=15},
+     {name="frequency", label="主动对话间隔", options={{description="安静（45秒）",data=45},{description="默认（25秒）",data=25},{description="健谈（12秒）",data=12}}, default=25},
+diff --git a/modmain.lua b/modmain.lua
+index 05a83e5..1185b1b 100644
+--- a/modmain.lua
++++ b/modmain.lua
+@@ -1,7 +1,9 @@
+ -- 入口仅绑定本机 HUD。无 prefab 注册，无服务器钩子，无 RPC。
+ local G = GLOBAL
+ if G.TheNet:IsDedicated() then return end
+-G.print("[ShadowSelf] 0.11.9 loaded: 16 personality dialogues, embedded native combat, focal shadow sound")
++local QueenDebug=require("shadowself/control/queendebug")
++QueenDebug.Configure(GetModConfigData("queen_debug")~=false)
++G.print("[ShadowSelf] "..QueenDebug.VERSION.." loaded: embedded combat; QueenDebug="..tostring(QueenDebug.enabled))
+ require("shadowself/native").Init(MODROOT)
+ local options = {
+     leash = GetModConfigData("leash") or 15,
+diff --git a/reviews/beequeen-0.12.7-validation.txt b/reviews/beequeen-0.12.7-validation.txt
+new file mode 100644
+index 0000000..d9c1d62
+--- /dev/null
++++ b/reviews/beequeen-0.12.7-validation.txt
+@@ -0,0 +1,65 @@
++验证类型：完整Lua 5.1离线回归；开启日志的原生走位/监督/扫描联动；Python提取器8项测试；非实机战斗验证。
++PASS: all Lua source compiles with Lua 5.1
++PASS: 419 assertions; 52 categories; 260 expressions; 524288 context parameters
++PASS: local actor movement, wait, lift, death, return, transition and effects cleanup
++PASS: 84 conversation cases; 89 new intents; 1110 phrase/group entries; followup and reply coverage
++PASS: 59 additional daily topics, 177 authored replies; slang normalization; existing negation/death semantics preserved
++PASS: speech follows actor, UTF8 pages, buried/pause timers and dialogue routing
++PASS: native prefab/alias/override paths, Wes silence, ghost, per-page local voice, interrupt/pause/hide/cleanup; native player talk channel untouched
++PASS: takeover consent, expiry, cancel, possession, stop/death; native combat bridge ownership/filter/settings
++PASS: native action callbacks, revoked callback, authoritative crafting and synchronized rebirth timelines
++PASS: imported zom multi-step/count parser, queue cancellation, AI Player priority decisions
++PASS: Lua 5.1 native Class/picker, imported AI initialization, hunger decision, server confirmation and cancellation: 11
++PASS: imported queue native scene callback invalidated on cancel
++PASS: autonomous 3014 entry, exclusive thread control, no health-threshold retreat and cancel
++PASS: real AI Player travel gear, synchronized weapon restoration and darkness light
++PASS: real equipment busy/late busy never blacklists; first recovered frame retries; stale travel acknowledgement releases
++PASS: actual equipment/inventory cane acknowledgement, hold while dodging near target, native exit weapon acknowledgement
++PASS: original AI group gather/evade/punish, off-target danger and focal shadow sound
++PASS: native combat hooks restored; work defense invalidates callbacks and preserves craft request
++PASS: Maxwell native CASTAOE slots, Boss/mob control, velocity sampling, pillars renewal, miss fallback, exclusions, host and cancel
++PASS: book-only range and armed native combat mode
++PASS: 16 profiles / 448 authored lines, text personality selection, commands, fixed text, frequency and save
++PASS: fresh context, recent-meal vs real hunger, negated joke, mood, silence, bounded memory and factual questions
++PASS: concurrent distinct pots before first completion; fair empty-pot rotation; powder reserved per pending base meal; exhaustion waits for all cooked/seasoned output; existing harvest, synchronized storage and cancel
++PASS: four ingredients submitted in the same call; acknowledged at 50ms response; no duplicate in-flight request; reopened storage synchronization preserved
++PASS: native chest/cooker coexistence; eight direct ingredients across two pots; one fridge open; far-container batch withdrawal; native open-source/destination checks; cancel cleanup
++PASS: repeated hits ask consent; ongoing care without forced possession or duplicate requests
++PASS: real batch bridge sends four exact native RPCs in one call; host path, closed source, revoked guard and four-slot cap
++PASS: left/right pincer -> third direction; short escape commitment avoids oscillation; third enemy and honey route checks
++PASS: rod equip, pond wait/hook/reel, ocean tension/reel/catch/recast, pause/cancel; queen first roster/last freeze/pipe, bounded straight lure, player-queen-guard formation, fixed cutback, command edge, timed return, fixed arena and honey avoidance
++PASS: battle BGM opt-out, live mixer .7/.2/0/1 gain, no restart, profile music fallback and stop
++PASS: native solo untouched; other real windup priority; group third direction/native distance; stable table; idle fallback ignored; cane chase/goto hysteresis, hit and danger suppression
++PASS: real 3014 dodge events equip cane after initial busy, preserve all 8 movement frames, restore weapon once before follow-up
++PASS: real 3014 fixed straight charge; interrupted equip/hit recovery; unsafe attack moves; surrounded exit; recovery vs active path
++PASS: actual installed game cooking tests, 11 Warly specialties, 316 registered seasoned products; jelly and dragon-chili salad ingredient solutions
++PASS: native builder replica: KnowsRecipe=false + CanLearn + accessible FOODPROCESSING permits powder; role/material/tech errors distinct; delayed tech sync, single crafting request, powder receipt and host path
++PASS: input-only chat, no transcript/history, enter-only send, right drag/save/resize; feet consent and stop retained
++PASS: local-shadow right-click -> head MBTI button -> sixteen choices, restore, timeout, possession/buried hiding and saved personality migration
++PASS: armor-slot combat button follows inventory rebuild/scale, starts/stops, and blocks ghost clicks
++PASS: grounded recipe, material deficit, carried+equipped count, recipe uses, builder conditions, item followup and execution-command isolation
++PASS: timed spore/spike defence, shark arc, bone chomp window, single blink/shell/missile drain, loot and exclusive chase/attack/manual boat phases
++PASS: walrus dogs/retreat/rush, sliding penguin sleep confirmation, charged-goat insulation/circle/bait/punish, confirmed jelly/chili refresh and non-blocking failed food
++PASS: 0.11.3 boss phase scenarios, queen colon callback, stable insulation, early bomb, vines, tentacle bait, Wonkey ownership and coast room; not live gameplay
++PASS: one antlion sidestep, fan flank, early glass-free spin, fixed lateral lunar lane, full crystal blast, leap-before-bait, early bomb, real walrus target loss and staff ATTACK
++PASS: ranged/torch early ignition, bare/regrown crystal, attached bomb registry and moving escape, wave-wide attack hold, tired/wake/vine/shell, bishop arc flank, possessed varg, bee freeze/queen pursuit and real planar/jelly weapon ranking
++PASS: bare eye vs arm regrowth, fume event/child fallback and real bomb movement ticks, exclusive queen gear owner, ten-guard long straight pull, antlion clear-side/backtracking, continuous weak-head output, bishop circle exit, fixed lunar lane and four warg variants
++PASS: real freeze animation/safe staff range, serial same-wave ghost pairs, late bomb/landing movement, weak-head follow-up ownership, close crystal flank and source-timed rabbit king charge/stuck/burrow/minions
++PASS: actual scheduler self-pause/Sleep reproduction, pure weak-head pulse, distinct ground mushroom explosives, off-target rook/kick lanes, lateral-only pair lock, inward second crystal throw, complete-swipe hold, honey exit and persistent ten-guard lure
++PASS: actual shipped ordinary-deer entry and exact frame window, struggle-pre weapon release, visual weak-head/middle recovery and actual supervisor attack/dodge/resume across mushroom growth and fuse
++PASS: antlion connected neck exit/future segment/short sidestep; idle-queen-range freeze, bee-centered orbit, attack-windup defence and immediate frozen handoff
++PASS: actual game instrument/hearing/frame30 and busy52; full-roster coverage, missing bee, confirmed sleep/solo/wake/retry/last-use; sleeping target and captured victim rejection; spicy-jelly suppression; actual native supervisor pause/resume
++PASS: freeze threat interrupts busy/cooldown and holds through impact; stage2 restored full-coverage midpoint and immediate wake repositioning; real FocusTarget/build/speed and frame23 release drive fixed straight phase3 pull past old leash, outward-only obstacle detour and immediate return/solo/rejoin cycle
++PASS: actual Gear/Travel/Queen with 300ms and 900ms delayed equip acknowledgement; repeated move/fight events cannot alternate cane/ice; one cane escape and one ice restore; movement continuous; freeze release retains ordinary cane/sword selection
++PASS: real inventory-first/equip-last enumeration with two ice/fire staffs; delayed cane restore retains exact selected entity; held/pending preference, broken/missing replacement and crystal support selection
++PASS: third-phase guard target veto before all overrides; actual native DoDodge captured-target follow-up blocked; actual supervisor/Scan retain queen beyond24 and known guards; boost-only pull, immediate normal-form return and close normal guards ignored
++PASS: QueenDebug lifecycle, .2s read-only sampling/2s heartbeat, health/equip/veto records, no per-frame flood, print budget, explicit disable and offline fixture
++PASS: enabled QueenDebug attached to actual native dodge/supePASS: Lua 5.1 regression complete; gameplay remains untested
++rvisor/Scan regression emits decisions, movement phases, attack veto and lifecycle without logger errors
++PASS: actual embedded engine and all support modules initialise under actual strict.lua, cached host RPC dispatch, remote RPC fallback and no external mod globals
++
++........
++----------------------------------------------------------------------
++Ran 8 tests in 0.006s
++
++OK
+diff --git a/reviews/queen-debug-existing/queen-debug.json b/reviews/queen-debug-existing/queen-debug.json
+new file mode 100644
+index 0000000..2b1412d
+--- /dev/null
++++ b/reviews/queen-debug-existing/queen-debug.json
+@@ -0,0 +1,10 @@
++{
++  "loaded_version": "0.12.6",
++  "trace_version": null,
++  "fight": null,
++  "events": {},
++  "warnings": [],
++  "timeline": [],
++  "equipment": [],
++  "snapshots": []
++}
+\ No newline at end of file
+diff --git a/reviews/queen-debug-existing/queen-debug.log b/reviews/queen-debug-existing/queen-debug.log
+new file mode 100644
+index 0000000..8b13789
+--- /dev/null
++++ b/reviews/queen-debug-existing/queen-debug.log
+@@ -0,0 +1 @@
++
+diff --git a/reviews/queen-debug-existing/queen-debug.md b/reviews/queen-debug-existing/queen-debug.md
+new file mode 100644
+index 0000000..1447d2b
+--- /dev/null
++++ b/reviews/queen-debug-existing/queen-debug.md
+@@ -0,0 +1,6 @@
++# 蜂后战调试报告
++
++客户端最近加载版本：0.12.6
++诊断版本：未读到；战斗：尚无记录
++
++尚未读到蜂后诊断战斗记录。请加载带QueenDebug的新版本，在调试日志开启时复现一轮蜂后战。
+diff --git a/reviews/queen-debug-offline-fixture.log b/reviews/queen-debug-offline-fixture.log
+new file mode 100644
+index 0000000..d0e40c7
+--- /dev/null
++++ b/reviews/queen-debug-offline-fixture.log
+@@ -0,0 +1,40 @@
++OFFLINE TEST FIXTURE - not live gameplay
++Loading mod: Cry for me (offline fixture) Version:0.12.7
++[ShadowSelf][QueenDebug] enabled=true event="boot" version="0.12.7"
++[ShadowSelf][QueenDebug] event="fight_start" fight="0.12.7-1-100000" phase=3.000 player="wilson#1" queen="beequeen#2" stage="dash_pull" t=0.000 version="0.12.7"
++[ShadowSelf][QueenDebug] blocked=false event="decision" fight="0.12.7-1-100000" mode="pull" phase=3.000 reason="none" stage="dash_pull" t=0.000 target="beequeen#2" version="0.12.7"
++[ShadowSelf][QueenDebug] boosted=1.000 count=1.000 detail="beeguard#3:dash:bee_guard_puffy_build:run_loop:4.0" event="guards" fight="0.12.7-1-100000" frozen=0.000 phase=3.000 sleeping=0.000 stage="dash_pull" t=0.000 version="0.12.7"
++[ShadowSelf][QueenDebug] attack_veto=0.000 blocked=false boosted=1.000 busy=false chasing=false distance=2.000 dropped=0.000 event="snapshot" fight="0.12.7-1-100000" forced="none" frozen=0.000 goal="none" guards=1.000 health=1.000 held="none" mode="pull" moved=0.000 native=true nearest=4.000 pending="none" phase=3.000 player_anim="unknown" pos="2.00,0.00" queen="beequeen#2" queen_anim="command2" queen_frame=0.000 queen_in_scan=false queen_pos="0.00,0.00" reason="none" select_veto=0.000 sleeping=0.000 stage="dash_pull" stalled=false support="none" t=0.000 target="beequeen#2" version="0.12.7"
++[ShadowSelf][QueenDebug] anim="unknown" delta=-0.200 event="hurt" fight="0.12.7-1-100000" health=0.800 phase=3.000 stage="dash_pull" t=0.700 version="0.12.7"
++[ShadowSelf][QueenDebug] event="attack_performed" fight="0.12.7-1-100000" phase=3.000 stage="dash_pull" t=0.700 target="beequeen#2" version="0.12.7"
++[ShadowSelf][QueenDebug] event="attack_performed" fight="0.12.7-1-100000" phase=3.000 stage="dash_pull" t=0.700 target="beequeen#2" version="0.12.7"
++[ShadowSelf][QueenDebug] event="equip_request" fight="0.12.7-1-100000" held="none" item="icestaff#4" phase=3.000 role="attack" stage="dash_pull" t=0.700 version="0.12.7"
++[ShadowSelf][QueenDebug] event="equip_ack" fight="0.12.7-1-100000" held="none" item="icestaff#4" latency=0.300 phase=3.000 role="attack" stage="dash_pull" t=0.700 version="0.12.7"
++[ShadowSelf][QueenDebug] event="attack_block" fight="0.12.7-1-100000" phase=3.000 source="CloseAndAttack" stage="dash_pull" t=0.700 target="beeguard#3" version="0.12.7"
++[ShadowSelf][QueenDebug] event="move_dispatch" fight="0.12.7-1-100000" goal="15.00,0.00" phase=3.000 pos="2.00,0.00" reason="蜂后 · 测试路线" stage="dash_pull" t=0.800 version="0.12.7"
++[ShadowSelf][QueenDebug] attack_veto=2.000 blocked=false boosted=1.000 busy=false chasing=false distance=2.000 dropped=0.000 event="snapshot" fight="0.12.7-1-100000" forced="none" frozen=0.000 goal="15.00,0.00" guards=1.000 health=0.800 held="none" mode="pull" moved=0.000 native=true nearest=4.000 pending="none" phase=3.000 player_anim="unknown" pos="2.00,0.00" queen="beequeen#2" queen_anim="command2" queen_frame=0.000 queen_in_scan=false queen_pos="0.00,0.00" reason="none" select_veto=1.000 sleeping=0.000 stage="dash_pull" stalled=true support="none" t=2.100 target="beequeen#2" version="0.12.7"
++[ShadowSelf][QueenDebug] boosted=0.000 count=1.000 detail="beeguard#3:normal:bee_guard_build:walk_loop:4.0" event="guards" fight="0.12.7-1-100000" frozen=0.000 phase=3.000 sleeping=0.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=1.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=2.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=3.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=4.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=5.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=6.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=7.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=8.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=9.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=10.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=11.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=12.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=13.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=14.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=15.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=16.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=17.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=18.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=19.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=20.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=21.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="spam_test" fight="0.12.7-1-100000" index=22.000 phase=3.000 stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] event="fight_end" fight="0.12.7-1-100000" phase=3.000 reason="test_done" stage="dash_pull" t=2.400 version="0.12.7"
++[ShadowSelf][QueenDebug] enabled=false event="boot" version="0.12.7"
+\ No newline at end of file
+diff --git a/reviews/queen-debug-offline-integration.log b/reviews/queen-debug-offline-integration.log
+new file mode 100644
+index 0000000..3a1af3c
+--- /dev/null
++++ b/reviews/queen-debug-offline-integration.log
+@@ -0,0 +1,26 @@
++OFFLINE INTEGRATION FIXTURE - not live gameplay
++[ShadowSelf][QueenDebug] enabled=true event="boot" version="0.12.7"
++[ShadowSelf][QueenDebug] event="fight_start" fight="0.12.7-2-0" phase=1.000 player="wilson#1" queen="beequeen#2" stage="lure" t=0.000 version="0.12.7"
++[ShadowSelf][QueenDebug] event="attack_block" fight="0.12.7-2-0" phase=3.000 source="CloseAndAttack" stage="lure" t=0.000 target="beeguard#3" version="0.12.7"
++[ShadowSelf][QueenDebug] event="attack_block" fight="0.12.7-2-0" phase=3.000 source="ShouldAtkWhenDodging" stage="lure" t=0.000 target="beeguard#3" version="0.12.7"
++[ShadowSelf][QueenDebug] event="attack_block" fight="0.12.7-2-0" phase=3.000 source="OnKeyFrame" stage="lure" t=0.000 target="beeguard#3" version="0.12.7"
++[ShadowSelf][QueenDebug] event="attack_block" fight="0.12.7-2-0" phase=3.000 source="OnNormalFrame" stage="lure" t=0.000 target="beeguard#3" version="0.12.7"
++[ShadowSelf][QueenDebug] direction="1.00,0.00" event="dash_start" fight="0.12.7-2-0" phase=3.000 pos="32.00,0.00" reason="guard_boost" stage="dash_pull" t=10.000 version="0.12.7"
++[ShadowSelf][QueenDebug] distance=32.000 event="dash_route" fight="0.12.7-2-0" goal="36.00,0.00" home=32.000 leash=54.000 phase=3.000 pos="32.00,0.00" route="straight" stage="dash_pull" t=10.000 version="0.12.7"
++[ShadowSelf][QueenDebug] blocked=true event="decision" fight="0.12.7-2-0" mode="pull" phase=3.000 reason="蜂后三阶段 · 固定直线远离蜂后带蜂" stage="dash_pull" t=10.000 target="beequeen#2" version="0.12.7"
++[ShadowSelf][QueenDebug] boosted=1.000 count=1.000 detail="beeguard#3:dash:bee_guard_puffy_build:unknown:2.0" event="guards" fight="0.12.7-2-0" frozen=0.000 phase=3.000 sleeping=0.000 stage="dash_pull" t=10.000 version="0.12.7"
++[ShadowSelf][QueenDebug] attack_veto=5.000 blocked=true boosted=1.000 busy=false chasing=true distance=32.000 dropped=0.000 event="snapshot" fight="0.12.7-2-0" forced="none" frozen=0.000 goal="none" guards=1.000 health=-1.000 held="none" mode="pull" moved=0.000 native=true nearest=2.000 pending="none" phase=3.000 player_anim="unknown" pos="32.00,0.00" queen="beequeen#2" queen_anim="unknown" queen_frame=0.000 queen_in_scan=false queen_pos="0.00,0.00" reason="蜂后三阶段 · 固定直线远离蜂后带蜂" select_veto=4.000 sleeping=0.000 stage="dash_pull" stalled=false support="none" t=10.000 target="beequeen#2" version="0.12.7"
++[ShadowSelf][QueenDebug] event="native_pause" fight="0.12.7-2-0" phase=3.000 stage="dash_pull" t=10.000 target="beequeen#2" version="0.12.7"
++[ShadowSelf][QueenDebug] distance=48.000 event="dash_end" fight="0.12.7-2-0" phase=3.000 queen_frame=0.000 reason="guard_normal" stage="dash_return" t=10.400 version="0.12.7"
++[ShadowSelf][QueenDebug] blocked=true event="decision" fight="0.12.7-2-0" mode="return" phase=3.000 reason="蜂后三阶段 · 冲刺已结束，直线折返蜂后" stage="dash_return" t=10.400 target="beequeen#2" version="0.12.7"
++[ShadowSelf][QueenDebug] boosted=0.000 count=1.000 detail="beeguard#3:normal:bee_guard_build:unknown:2.0" event="guards" fight="0.12.7-2-0" frozen=0.000 phase=3.000 sleeping=0.000 stage="dash_return" t=10.400 version="0.12.7"
++[ShadowSelf][QueenDebug] distance=2.000 event="queen_solo" fight="0.12.7-2-0" phase=3.000 stage="dash_return" t=10.600 version="0.12.7"
++[ShadowSelf][QueenDebug] blocked=false event="decision" fight="0.12.7-2-0" mode="solo" phase=3.000 reason="蜂后 · 守卫在后，输出蜂后本体" stage="strike" t=10.600 target="beequeen#2" version="0.12.7"
++[ShadowSelf][QueenDebug] event="native_resume" fight="0.12.7-2-0" phase=3.000 stage="strike" t=10.600 target="beequeen#2" version="0.12.7"
++[ShadowSelf][QueenDebug] direction="1.00,0.00" event="dash_start" fight="0.12.7-2-0" phase=3.000 pos="2.00,0.00" reason="guard_boost" stage="dash_pull" t=11.000 version="0.12.7"
++[ShadowSelf][QueenDebug] distance=2.000 event="dash_route" fight="0.12.7-2-0" goal="6.00,0.00" home=2.000 leash=54.000 phase=3.000 pos="2.00,0.00" route="straight" stage="dash_pull" t=11.000 version="0.12.7"
++[ShadowSelf][QueenDebug] blocked=true event="decision" fight="0.12.7-2-0" mode="pull" phase=3.000 reason="蜂后三阶段 · 固定直线远离蜂后带蜂" stage="dash_pull" t=11.000 target="beequeen#2" version="0.12.7"
++[ShadowSelf][QueenDebug] boosted=1.000 count=1.000 detail="beeguard#3:dash:bee_guard_puffy_build:unknown:3.0" event="guards" fight="0.12.7-2-0" frozen=0.000 phase=3.000 sleeping=0.000 stage="dash_pull" t=11.000 version="0.12.7"
++[ShadowSelf][QueenDebug] event="native_pause" fight="0.12.7-2-0" phase=3.000 stage="dash_pull" t=11.000 target="beequeen#2" version="0.12.7"
++[ShadowSelf][QueenDebug] event="fight_end" fight="0.12.7-2-0" phase=3.000 reason="takeover_stop" stage="dash_pull" t=11.000 version="0.12.7"
++[ShadowSelf][QueenDebug] enabled=false event="boot" version="0.12.7"
+\ No newline at end of file
+diff --git a/scripts/shadowself/control/beequeen.lua b/scripts/shadowself/control/beequeen.lua
+index 6ab0432..b083560 100644
+--- a/scripts/shadowself/control/beequeen.lua
++++ b/scripts/shadowself/control/beequeen.lua
+@@ -4,6 +4,7 @@ local Status=require("shadowself/control/status")
+ local Nav=require("shadowself/control/navigation")
+ local GuardPosition=require("shadowself/control/guardposition")
+ local GuardHands=require("shadowself/control/guardhands")
++local Debug=require("shadowself/control/queendebug")
+ local Queen=Class(function(self,c) self.c=c;self.stage="lure";self.next_support=0 end)
+ function Queen:Target(e)
+     local c=self.c;c.target=e;self.allow=e;c.blocked=false;c.bridge.priority_target=e
+@@ -24,8 +25,10 @@ end
+ -- 固定战场中心，不随着蜂后/玩家的位置不断向外漂移。
+ function Queen:Anchor(queen)
+     if self.queen==queen then return end
++    Debug.End(self.c,"queen_changed")
+     self.queen=queen;self.stage="lure";self.lure_since=GetTime();self.side=1
+     self.late=nil;self.phase=1;self.roster={};self.had_roster=nil;self.predicted={};self.was_command=nil;self.piped=nil;self.flute_cycle=nil;self.flute_guards=nil;self.next_flute_scan=nil;self.guard_escape=nil;self.dash_cycle=nil
++    Debug.Start(self.c,queen)
+     local qp=queen:GetPosition();self.anchor=Vector3(qp.x,0,qp.z)
+     local nearest
+     for _,e in ipairs(TheSim:FindEntities(qp.x,0,qp.z,60)) do
+@@ -129,7 +132,7 @@ function Queen:Tick()
+     for _,e in ipairs(c.enemies) do if e.prefab=="beequeen" and c.bridge.allowed(e) then queen=e;break end end
+     -- 直线带蜂会超过24码常规选敌半径，不能因此丢失仍有效的蜂后战。
+     if not queen and self.phase and self.phase>=3 and self.queen and self.queen:IsValid() and c.bridge.allowed(self.queen) then queen=self.queen end
+-    if not queen then GuardHands.Release(self);self.allow=nil;self.flute_cycle=nil;self:ReleaseTravel();return false end
++    if not queen then Debug.End(c,"queen_unavailable");GuardHands.Release(self);self.allow=nil;self.flute_cycle=nil;self:ReleaseTravel();return false end
+     self:Anchor(queen)
+     local p=c.player;local pos=p:GetPosition();local qp=queen:GetPosition();local now=GetTime()
+     local distance=math.sqrt(pos:DistSq(qp))
+@@ -159,6 +162,7 @@ function Queen:Tick()
+         if not Status.Sleeping(e) and d<near then nearest,near=e,d end
+         if e:GetPosition():DistSq(qp)<81 then far=false end
+     end end
++    self.debug_bees=bees
+     local health=queen.replica and queen.replica.health
+     local percent=health and health.GetPercent and health:GetPercent()
+     if percent then self.phase=math.max(self.phase,percent<=.25 and 4 or percent<=.5 and 3 or percent<=.75 and 2 or 1) end
+@@ -268,4 +272,8 @@ function Queen:Tick()
+     -- 交回3014完成攻击与本体招式躲避，蜂蜜地面由统一路径层排除。
+     return self:Strike(queen,pos,qp,distance)
+ end
++local Tick=Queen.Tick
++function Queen:Tick()
++ local result=Tick(self);Debug.Sample(self);return result
++end
+ return Queen
+diff --git a/scripts/shadowself/control/combat.lua b/scripts/shadowself/control/combat.lua
+index 3424407..8d34701 100644
+--- a/scripts/shadowself/control/combat.lua
++++ b/scripts/shadowself/control/combat.lua
+@@ -1,5 +1,6 @@
+ -- 桥接已启用的 3014188454 / 3750329397，保留原作者进程和怪物动作表。
+ -- 走A：StartHitAndRun -> IsAttackPre -> DoDodge；纯走位复用 IsAttackPre/DoDodge。
++local Debug=require("shadowself/control/queendebug")
+ local Bridge=Class(function(self,player) self.player=player end)
+ function Bridge:Available()
+     local n=require("shadowself/native").Get();local h=n.HitAndRun
+@@ -22,7 +23,7 @@ function Bridge:Start(plan,matches)
+     local function allowed(e)
+         if not e or not e:IsValid() or e==self.player or e:HasTag("player") or e:HasTag("playerghost") then return false end
+         local queen=self.coordinator and self.coordinator.beequeen
+-        if queen and queen.GuardAttackBlocked and queen:GuardAttackBlocked(e) then return false end
++        if queen and queen.GuardAttackBlocked and queen:GuardAttackBlocked(e) then Debug.Block(self.coordinator,"select",e);return false end
+         if e.prefab=="beeguard" and require("shadowself/control/status").Sleeping(e) then return false end
+         if e.prefab=="icehound" or e.prefab=="firehound" then
+             local a=e.AnimState
+@@ -104,6 +105,7 @@ function Bridge:PauseAttack()
+     end
+     self.pause_requested=nil
+     if self:OwnsThread() then
++        Debug.Event(self.coordinator,"native_pause",{target=Debug.Entity(self.h.ent)})
+         local thread=self.thread;if self.native==_G or self:PlayerReady() then self.h:StopHitAndRun() end
+         -- 原停止入口在聊天/菜单时会跳过；仍须真正暂停自己的攻击协程。
+         if self.tuning.Cheatthread==thread then
+@@ -115,6 +117,7 @@ function Bridge:PauseAttack()
+ end
+ function Bridge:ResumeAttack()
+     if self:OwnsThread() then return end
++    Debug.Event(self.coordinator,"native_resume",{target=Debug.Entity(self.h.ent)})
+     self.h:StartHitAndRun();self.thread=self.tuning.Cheatthread
+ end
+ function Bridge:Supervise()
+@@ -194,6 +197,7 @@ function Bridge:Supervise()
+                     c:Scan();c.mechanisms=c.mechanisms or require("shadowself/control/mechanisms")(c);c.mechanisms:Tick()
+                 end
+             end
++            Debug.Sample(self.coordinator and self.coordinator.beequeen)
+             Sleep(FRAMES)
+         end
+     end,"shadowself_combat_supervisor")
+@@ -220,9 +224,14 @@ function Bridge:Coordinate(plan)
+     if self.player.ListenForEvent then
+         self.manual_listener=function(_,data)
+             local act=data and (data.action or data)
++            Debug.Performed(self.coordinator,data)
+             if act and (act.action==ACTIONS.JUMPIN or act.action==ACTIONS.JUMPOFF or act.action==ACTIONS.HOP) then self.manual_until=GetTime()+2 end
+         end
+         self.player:ListenForEvent("performaction",self.manual_listener)
++        self.debug_hurt_listener=function(_,data)
++            if data then Debug.Event(self.coordinator,"attacked",{attacker=Debug.Entity(data.attacker),damage=data.damage or -1,pos=Debug.Point(self.player:GetPosition())}) end
++        end
++        self.player:ListenForEvent("attacked",self.debug_hurt_listener)
+         self.equip_listener=function(_,data)
+             local c=self.coordinator
+             if not c or not data then return end
+@@ -252,7 +261,7 @@ function Bridge:Coordinate(plan)
+             local c=self.coordinator
+             if self.pause_requested then return false end
+             local explicit=...;local victim=(name=="CloseAndAttack" or name=="ShouldAtkWhenDodging") and type(explicit)=="table" and explicit.prefab and explicit or object.ent
+-            if c.beequeen and c.beequeen.GuardAttackBlocked and c.beequeen:GuardAttackBlocked(victim) then return false end
++            if c.beequeen and c.beequeen.GuardAttackBlocked and c.beequeen:GuardAttackBlocked(victim) then Debug.Block(c,name,victim);return false end
+             if victim and c.bosses and c.bosses.AttackBlocked and c.bosses:AttackBlocked(victim) then return false end
+             if victim and victim.prefab=="beeguard" and c.beequeen and c.beequeen.queen and (require("shadowself/control/status").Frozen(victim) or require("shadowself/control/status").Sleeping(victim)) then return false end
+             if object.ent and not self.allowed(object.ent) then return false end
+@@ -268,6 +277,7 @@ function Bridge:Coordinate(plan)
+             if name=="ShouldAtkWhenDodging" and argv[2] and argv[2].noattack then return false end
+             if name=="ShouldAtkWhenDodging" and c.queen_dodging then return false end
+             if name=="ShouldAtkWhenDodging" and c.charge_target and c.charge_target==object.ent then return false end
++            if name=="CloseAndAttack" then Debug.Throttle(c,"attack_dispatch",.25,"attack_dispatch",{target=Debug.Entity(victim)}) end
+             return old(object,...)
+         end)
+     end
+@@ -310,12 +320,15 @@ function Bridge:Finished()
+ end
+ function Bridge:OwnsThread() return self.thread~=nil and (self.tuning or require("shadowself/native").Get().TUNING).Cheatthread==self.thread end
+ function Bridge:Stop()
++    Debug.End(self.coordinator,"takeover_stop")
+     local pc=self.action_pc or self.player.components and self.player.components.playercontroller
+     if pc and self.action_hook and pc.DoAction==self.action_hook then pc.DoAction=self.action_old end
+     self.action_hook=nil;self.action_old=nil
+     if self.supervisor then KillThreadsWithID(self.supervisor.id);self.supervisor:SetList(nil);self.supervisor=nil end
+     if self.manual_listener and self.player.RemoveEventCallback then self.player:RemoveEventCallback("performaction",self.manual_listener) end
+     self.manual_listener=nil
++    if self.debug_hurt_listener and self.player.RemoveEventCallback then self.player:RemoveEventCallback("attacked",self.debug_hurt_listener) end
++    self.debug_hurt_listener=nil
+     if self.equip_listener and self.player.RemoveEventCallback then self.player:RemoveEventCallback("EquipItem",self.equip_listener) end
+     self.equip_listener=nil
+     if self.recovery_task then self.recovery_task:Cancel();self.recovery_task=nil end
+diff --git a/scripts/shadowself/control/coordinator.lua b/scripts/shadowself/control/coordinator.lua
+index c687613..588eaec 100644
+--- a/scripts/shadowself/control/coordinator.lua
++++ b/scripts/shadowself/control/coordinator.lua
+@@ -52,6 +52,7 @@ function Coordinator:Move(point,label)
+     self.blocked=true;self.status=label;self.last_action_kind="move";self.last_point=point
+     if GetTime()>=(self.next_move or 0) then
+         require("shadowself/native").Get().POS_util:GoToPoint(point.x,point.z);self.next_move=GetTime()+.1
++        require("shadowself/control/queendebug").Move(self,point,label)
+     end
+ end
+ function Coordinator:Dodge(enemies,observed,label)
+diff --git a/scripts/shadowself/control/guarddefence.lua b/scripts/shadowself/control/guarddefence.lua
+index 367e902..e657d7f 100644
+--- a/scripts/shadowself/control/guarddefence.lua
++++ b/scripts/shadowself/control/guarddefence.lua
+@@ -10,6 +10,7 @@ function G.Tick(q,queen,now)
+  if winding and inside then
+   if not state then
+    state={hand=c.gear:Mobile(c.snapshot) or c.gear.forced_weapon};q.guard_escape=state;c.next_move=nil
++   require("shadowself/control/queendebug").Event(c,"guard_dodge_start",{queen_frame=frame,pos=require("shadowself/control/queendebug").Point(p:GetPosition())})
+   end
+   local latency=c.Latency and c:Latency() or .1
+   state.untiltime=now+(14-frame)*(FRAMES or 1/30)+latency
+@@ -33,7 +34,7 @@ function G.Tick(q,queen,now)
+   if state.point then c:Move(state.point,"蜂后 · 冻蜂先停手，立即躲本体攻击") end
+   c.blocked=true;return true
+  end
+- if state then q.next_support=math.min(q.next_support or now,now) end
++ if state then require("shadowself/control/queendebug").Event(c,"guard_dodge_end",{queen_frame=frame});q.next_support=math.min(q.next_support or now,now) end
+  q.guard_escape=nil;return false
+ end
+ return G
+diff --git a/scripts/shadowself/control/guardhands.lua b/scripts/shadowself/control/guardhands.lua
+index a02a9c5..77e03f3 100644
+--- a/scripts/shadowself/control/guardhands.lua
++++ b/scripts/shadowself/control/guardhands.lua
+@@ -4,6 +4,7 @@ function H.Set(q,item,phase)
+  local gear=q.c.gear;local current=gear.support_hand
+  if not current or current.owner~=q or current.item~=item or current.phase~=phase then
+   gear.support_hand={owner=q,item=item,phase=phase}
++  require("shadowself/control/queendebug").Event(q.c,"support_hand",{phase=phase,item=require("shadowself/control/queendebug").Entity(item)})
+   -- 旧请求仍等实际手持确认；不因 native move/attack 事件来回取消它。
+   if not gear.pending then gear.next_request=GetTime() end
+  end
+diff --git a/scripts/shadowself/control/queendash.lua b/scripts/shadowself/control/queendash.lua
+index 36f7833..bf35aa8 100644
+--- a/scripts/shadowself/control/queendash.lua
++++ b/scripts/shadowself/control/queendash.lua
+@@ -14,6 +14,7 @@ local function enter(q,state,queen,pos)
+  local qp=queen:GetPosition();local dx,dz=pos.x-qp.x,pos.z-qp.z;local d=math.sqrt(dx*dx+dz*dz)
+  if d<.01 then dx,dz,d=1,0,1 end
+  state.dir={x=dx/d,z=dz/d};q.stage="dash_pull"
++ require("shadowself/control/queendebug").Event(q.c,"dash_start",{pos=require("shadowself/control/queendebug").Point(pos),direction=string.format("%.2f,%.2f",dx/d,dz/d),reason="guard_boost"})
+ end
+ -- 拉蜂使用固定外移直线，不复用 Queen:Move 的18码边界/切线候选。
+ function D.Pull(q,state,queen,pos)
+@@ -26,7 +27,7 @@ function D.Pull(q,state,queen,pos)
+   return (point.x-pos.x)*dir.x+(point.z-pos.z)*dir.z>.2
+    and point:DistSq(qp)>(distance+.1)^2 and point:DistSq(home)<=leash^2
+  end
+- local straight=Vector3(pos.x+dir.x*4,0,pos.z+dir.z*4);local goal
++ local straight=Vector3(pos.x+dir.x*4,0,pos.z+dir.z*4);local goal;local route="straight"
+  if forward(straight) and Nav.Safe(c,straight,queen) then goal=straight end
+  if not goal then
+   -- 障碍只允许向原外移方向前进的小角度绕行，不选绕蜂后的圆周路线。
+@@ -34,10 +35,11 @@ function D.Pull(q,state,queen,pos)
+    local a=angle*math.pi/180
+    local dx,dz=dir.x*math.cos(a)-dir.z*math.sin(a),dir.x*math.sin(a)+dir.z*math.cos(a)
+    local point=Vector3(pos.x+dx*4,0,pos.z+dz*4)
+-   if forward(point) and Nav.Safe(c,point,queen) then goal=point;break end
++   if forward(point) and Nav.Safe(c,point,queen) then goal=point;route="outward_detour";break end
+   end
+  end
+- goal=goal or Nav.Escape(c,straight,queen,forward)
++ if not goal then goal=Nav.Escape(c,straight,queen,forward);route=goal and "escape" or "blocked" end
++ require("shadowself/control/queendebug").Throttle(c,"dash_route:"..route,1,"dash_route",{route=route,pos=require("shadowself/control/queendebug").Point(pos),goal=require("shadowself/control/queendebug").Point(goal),distance=distance,home=math.sqrt(pos:DistSq(home)),leash=leash})
+  c:Move(goal or pos,"蜂后三阶段 · 固定直线远离蜂后带蜂")
+ end
+ function D.Tick(q,queen,bees,now)
+@@ -62,6 +64,7 @@ function D.Tick(q,queen,bees,now)
+   local finished=ending or state.seen_dash and not dashing
+   if finished then
+    state.mode="return";q.stage="dash_return";c.next_move=nil
++   require("shadowself/control/queendebug").Event(c,"dash_end",{reason=ending and "command3_frame23" or "guard_normal",queen_frame=frame,distance=math.sqrt(pos:DistSq(qp))})
+   else
+    q.stage="dash_pull";D.Pull(q,state,queen,pos)
+    return true
+@@ -77,6 +80,7 @@ function D.Tick(q,queen,bees,now)
+   end
+   q:ReleaseTravel();c.bridge.chasing=nil;if c.travel then c.travel.chasing=nil end
+   state.mode="solo"
++  require("shadowself/control/queendebug").Event(c,"queen_solo",{distance=distance})
+  end
+  q.stage="strike";return q:Strike(queen,pos,qp,math.sqrt(pos:DistSq(qp)))
+ end
+diff --git a/scripts/shadowself/control/queendebug.lua b/scripts/shadowself/control/queendebug.lua
+new file mode 100644
+index 0000000..1fdc44d
+--- /dev/null
++++ b/scripts/shadowself/control/queendebug.lua
+@@ -0,0 +1,112 @@
++-- 只读蜂后诊断：写入原版client_log，不联网，不发送动作，不逐帧刷日志。
++local M={VERSION="0.12.7",enabled=false,serial=0}
++local function now() return GetTime and GetTime() or 0 end
++function M.Entity(e) return e and (tostring(e.prefab or "?").."#"..tostring(e.GUID or "?")) or "none" end
++function M.Point(v) return v and string.format("%.2f,%.2f",v.x,v.z) or "none" end
++local function value(v)
++ if type(v)=="number" then return string.format("%.3f",v) end
++ if type(v)=="boolean" then return tostring(v) end
++ return string.format("%q",tostring(v):gsub("[%c]"," "))
++end
++local function line(fields)
++ local keys={};for key in pairs(fields) do keys[#keys+1]=key end;table.sort(keys)
++ local out={"[ShadowSelf][QueenDebug]"};for _,key in ipairs(keys) do out[#out+1]=key.."="..value(fields[key]) end
++ print(table.concat(out," "))
++end
++function M.Configure(enabled)
++ M.enabled=enabled==true
++ line({event="boot",version=M.VERSION,enabled=M.enabled})
++end
++function M.Start(c,queen)
++ if not M.enabled then return end
++ M.serial=M.serial+1
++ c._queen_debug={fight=M.VERSION.."-"..M.serial.."-"..math.floor(now()*1000),start=now(),last={},throttle={},counts={},window=now(),lines=0,dropped=0}
++ M.Event(c,"fight_start",{queen=M.Entity(queen),player=M.Entity(c.player)})
++end
++function M.Event(c,event,fields)
++ local s=M.enabled and c and c._queen_debug;if not s then return end
++ local t=now();if t-s.window>=1 then s.window=t;s.lines=0 end
++ if s.lines>=24 and event~="snapshot" and event~="fight_end" then s.dropped=s.dropped+1;return end
++ s.lines=s.lines+1
++ local out={event=event,version=M.VERSION,fight=s.fight,t=t-s.start}
++ local queen=c.beequeen;if queen then out.phase=queen.phase;out.stage=queen.stage end
++ for key,v in pairs(fields or {}) do out[key]=v end;line(out)
++end
++function M.Change(c,key,signature,fields)
++ local s=M.enabled and c and c._queen_debug;if not s or s.last[key]==signature then return end
++ s.last[key]=signature;M.Event(c,key,fields)
++end
++function M.Throttle(c,key,seconds,event,fields)
++ local s=M.enabled and c and c._queen_debug;if not s or now()<(s.throttle[key] or 0) then return end
++ s.throttle[key]=now()+seconds;M.Event(c,event,fields)
++end
++function M.End(c,reason)
++ if c and c._queen_debug then M.Event(c,"fight_end",{reason=reason});c._queen_debug=nil end
++end
++function M.Block(c,source,victim)
++ local s=M.enabled and c and c._queen_debug;if not s then return end
++ local key=source=="select" and "select_veto" or "attack_veto"
++ s.counts[key]=(s.counts[key] or 0)+1
++ if source~="select" then M.Throttle(c,"attack_veto:"..source,1,"attack_block",{source=source,target=M.Entity(victim)}) end
++end
++function M.Performed(c,data)
++ if not M.enabled or not c or not c._queen_debug or type(data)~="table" then return end
++ local act=data
++ if type(data.action)=="table" and data.action.action then act=data.action end
++ if act.action==ACTIONS.ATTACK then M.Event(c,"attack_performed",{target=M.Entity(act.target)}) end
++end
++function M.Equip(c,event,item,role,extra)
++ if not M.enabled or not c or not c._queen_debug then return end
++ local fields={item=M.Entity(item),role=role,held=M.Entity(c.player.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS))}
++ for k,v in pairs(extra or {}) do fields[k]=v end
++ M.Event(c,"equip_"..event,fields)
++end
++function M.Move(c,point,label)
++ local s=M.enabled and c and c._queen_debug;if not s then return end
++ s.last_move=now();s.goal=point
++ M.Throttle(c,"move:"..tostring(label),.5,"move_dispatch",{pos=M.Point(c.player:GetPosition()),goal=M.Point(point),reason=label})
++end
++local function animation(e)
++ local n=require("shadowself/native").Get();local util=n and n.ENT_util
++ return (util and util.GetAnimation and util:GetAnimation(e)) or "unknown"
++end
++local function sample(q)
++ local c=q.c;local s=c._queen_debug;if not s or now()<(s.next_sample or 0) then return end
++ s.next_sample=now()+.2
++ local p=c.player;local queen=q.queen;if not queen or not queen:IsValid() then return end
++ local pos=p:GetPosition();local qp=queen:GetPosition();local status=require("shadowself/control/status")
++ local guards={};local signature={};local boost,sleep,frozen,near=0,0,0,math.huge
++ for _,e in ipairs(q.debug_bees or {}) do if e:IsValid() then
++  local mode=status.Sleeping(e) and "sleep" or status.Frozen(e) and "frozen" or require("shadowself/control/queendash").Dashing(e) and "dash" or "normal"
++  if mode=="dash" then boost=boost+1 elseif mode=="sleep" then sleep=sleep+1 elseif mode=="frozen" then frozen=frozen+1 end
++  local d=math.sqrt(pos:DistSq(e:GetPosition()));near=math.min(near,d)
++  local build=e.AnimState and e.AnimState.GetBuild and e.AnimState:GetBuild() or "?"
++  signature[#signature+1]=M.Entity(e)..":"..mode
++  guards[#guards+1]=M.Entity(e)..":"..mode..":"..build..":"..animation(e)..":"..string.format("%.1f",d)
++ end end
++ table.sort(guards);table.sort(signature)
++ local fields={phase=q.phase,stage=q.stage,mode=q.dash_cycle and q.dash_cycle.mode or "none",target=M.Entity(c.h.ent),blocked=c.blocked==true,reason=c.status or "none"}
++ M.Change(c,"decision",table.concat({tostring(fields.phase),tostring(fields.stage),fields.mode,fields.target,tostring(fields.blocked)},"/"),fields)
++ M.Change(c,"guards",table.concat(signature,";"),{count=#guards,boosted=boost,sleeping=sleep,frozen=frozen,detail=table.concat(guards,";")})
++ local pc=p.components.playercontroller;local busy=pc:IsBusy();local hp=p.replica and p.replica.health
++ local percent=hp and hp.GetPercent and hp:GetPercent()
++ if percent and s.hp and percent<s.hp then M.Event(c,"hurt",{health=percent,delta=percent-s.hp,anim=animation(p)}) end
++ if percent then s.hp=percent end
++ if now()<(s.next_snapshot or 0) then return end;s.next_snapshot=now()+2
++ local distance=s.previous and math.sqrt(pos:DistSq(s.previous)) or 0
++ local stalled=s.previous~=nil and distance<.15 and s.goal~=nil and pos:DistSq(s.goal)>1 and s.last_move~=nil and now()-s.last_move<2.5 and not busy
++ s.previous=Vector3(pos.x,0,pos.z)
++ local seen=false;for _,e in ipairs(c.enemies or {}) do if e==queen then seen=true;break end end
++ local gear=c.gear;local pending=gear.pending;local hand=gear.support_hand
++ M.Event(c,"snapshot",{phase=q.phase,stage=q.stage,mode=fields.mode,queen=M.Entity(queen),queen_anim=animation(queen),queen_frame=queen.AnimState:GetCurrentAnimationFrame(),queen_in_scan=seen,
++  pos=M.Point(pos),queen_pos=M.Point(qp),distance=math.sqrt(pos:DistSq(qp)),guards=#guards,boosted=boost,sleeping=sleep,frozen=frozen,nearest=near<math.huge and near or -1,
++  target=M.Entity(c.h.ent),busy=busy,player_anim=animation(p),health=percent or -1,blocked=c.blocked==true,native=c.bridge.OwnsThread and c.bridge:OwnsThread() or false,
++  chasing=c.bridge.chasing==true,held=M.Entity(p.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)),forced=M.Entity(gear.forced_weapon),pending=M.Entity(pending and pending.item),support=hand and hand.phase or "none",
++  goal=M.Point(s.goal),moved=distance,stalled=stalled,select_veto=s.counts.select_veto or 0,attack_veto=s.counts.attack_veto or 0,dropped=s.dropped,reason=c.status or "none"})
++end
++function M.Sample(q)
++ if not M.enabled or not q or not q.c or not q.c._queen_debug then return end
++ local ok,error=pcall(sample,q)
++ if not ok then M.Throttle(q.c,"logger_error",30,"logger_error",{message=tostring(error)}) end
++end
++return M
+diff --git a/scripts/shadowself/control/queenflute.lua b/scripts/shadowself/control/queenflute.lua
+index 8bd7a83..a0cc0b3 100644
+--- a/scripts/shadowself/control/queenflute.lua
++++ b/scripts/shadowself/control/queenflute.lua
+@@ -50,10 +50,12 @@ function F.Tick(q,queen,bees,flute,now)
+         -- 发出 PLAY 不等于催眠成功；等原版第30帧结算和实际睡眠复制。
+         if asleep and Status.Sleeping(queen) then state.confirmed=true end
+         if state.confirmed and not pc:IsBusy() then
++            require("shadowself/control/queendebug").Event(c,"flute_confirmed",{guards=#bees})
+             state.pending=nil;state.confirmed=nil;state.solo=asleep
+         elseif now<state.pending or pc:IsBusy() then
+             c.blocked=true;c.status="蜂后 · 等待吹奏结算与全员睡眠确认";return true
+         else
++            require("shadowself/control/queendebug").Event(c,"flute_timeout",{guards=#bees})
+             state.pending=nil;state.confirmed=nil;state.next_play=now+.5
+         end
+     end
+@@ -70,9 +72,10 @@ function F.Tick(q,queen,bees,flute,now)
+         release(q)
+         if now>=(state.next_play or 0) and not pc:IsBusy() then
+             if A.Self(p,flute,ACTIONS.PLAY) then
++                require("shadowself/control/queendebug").Event(c,"flute_request",{guards=#bees,range=F.Range(flute)})
+                 local ping=TheNet and TheNet.GetPing and TheNet:GetPing()/1000 or 0
+                 state.pending=now+math.max(4,2+ping*2);state.confirmed=nil
+-            else state.next_play=now+.5 end
++            else require("shadowself/control/queendebug").Throttle(c,"flute_rejected",1,"flute_rejected",{reason="PLAY_unavailable"});state.next_play=now+.5 end
+         end
+         c.status="蜂后 · 全员进入排箫范围，准备催眠"
+     elseif not pc:IsBusy() then
+diff --git a/scripts/shadowself/legacy/combat_equipment.lua b/scripts/shadowself/legacy/combat_equipment.lua
+index 60d396e..ae64ea8 100644
+--- a/scripts/shadowself/legacy/combat_equipment.lua
++++ b/scripts/shadowself/legacy/combat_equipment.lua
+@@ -1,4 +1,5 @@
+ local AIPLAYER=require("shadowself/legacy/registry")
++local Debug=require("shadowself/control/queendebug")
+ -- Public replica attributes, original EQUIP actions, and observed hand-slot
+ -- changes. A pending equip never counts as extra movement speed or a weapon.
+ local function read(o,name,fallback,...)
+@@ -122,13 +123,15 @@ function Gear:Swap(role,snapshot)
+     local pending=self.pending
+     if pending and pending.role and pending.role~=role and not support then
+         -- A cancelled travel equip cannot hold up returning to combat (or vice versa).
++        Debug.Equip(self.combat,"cancel_role",pending.item,role)
+         self.pending=nil;pending=nil;self.next_request=now
+     end
+     if pending then
+-        if hand==pending.item then self.pending=nil
++        if hand==pending.item then Debug.Equip(self.combat,"ack",pending.item,role,{latency=pending.senttime and now-pending.senttime or -1});self.pending=nil
+         elseif busy then return false -- transient hit/busy is not a rejected item
+         elseif now<pending.untiltime and pending.item:IsValid() and self:Owned(pending.item) then return false
+         else
++            Debug.Equip(self.combat,"timeout",pending.item,role)
+             self.failed[pending.item]=now+3;self.pending=nil
+             self.combat.actions:Stop();self.combat.last_action_kind=nil;self.combat.last_point=nil
+         end
+@@ -148,9 +151,10 @@ function Gear:Swap(role,snapshot)
+     end
+     local sent,reason=self.combat.actions:Execute(act)
+     if sent then
+-        self.pending={item=wanted,role=role,untiltime=now+1.2};self.next_request=now+.25
++        self.pending={item=wanted,role=role,untiltime=now+1.2,senttime=now};self.next_request=now+.25
++        Debug.Equip(self.combat,"request",wanted,role)
+         if role=="move" then self.mobile=wanted end
+-    elseif reason~="角色忙碌" then self.failed[wanted]=now+3 end
++    elseif reason~="角色忙碌" then Debug.Equip(self.combat,"rejected",wanted,role,{reason=reason or "unknown"});self.failed[wanted]=now+3 end
+     return false
+ end
+ function Gear:Reset()self.support_hand=nil;self.weapon=nil;self.mobile=nil;self.pending=nil;self.failed={};self.next_request=0 end
+diff --git a/tests/queen_debug.lua b/tests/queen_debug.lua
+new file mode 100644
+index 0000000..36b30ea
+--- /dev/null
++++ b/tests/queen_debug.lua
+@@ -0,0 +1,73 @@
++local savedA=package.loaded["shadowself/control/actions"]
++local savedN=require("shadowself/native").context
++local now=0;GetTime=function() return now end;FRAMES=1/30
++EQUIPSLOTS={HANDS="hands",HEAD="head",BODY="body"};ACTIONS={ATTACK={},EQUIP={},PICKUP={},CHOP={},PLAY={}}
++TUNING={TOADSTOOL_SPOREBOMB_TIMER=3.5,TOADSTOOL_SPORECLOUD_RADIUS=3.5,TENTACLE_STOPATTACK_DIST=4}
++Vector3=function(x,y,z) local p={x=x,y=y,z=z};function p:DistSq(q) return (self.x-q.x)^2+(self.z-q.z)^2 end;return p end
++local guid=0
++local function entity(name,x,z)
++ guid=guid+1;local e={prefab=name,GUID=guid,pos=Vector3(x or 0,0,z or 0),frame=0,tags={},replica={},components={},entity={}}
++ function e:IsValid() return true end;function e:HasTag(t) return self.tags[t] or false end
++ function e:GetPosition() return self.pos end;function e:GetPhysicsRadius() return .5 end
++ e.AnimState={IsCurrentAnimation=function(_,n) return e.anim==n end,GetCurrentAnimationFrame=function() return e.frame end}
++ e.Transform={GetRotation=function() return 0 end};e.entity.GetParent=function() return e.parent end;return e
++end
++local p=entity("wilson",2,0);local held={};local items={};local commands={};local entities={}
++p.replica.inventory={GetEquippedItem=function(_,slot) return held[slot] end,DropItemFromInvTile=function(_,item) commands[#commands+1]={drop=item} end}
++p.replica.combat={};p.components.playercontroller={IsBusy=function() return false end}
++ThePlayer=p;TheWorld={state={}};TheSim={FindEntities=function() return entities end}
++local A={Items=function() return items end,Self=function(_,item,action) held.hands=item;commands[#commands+1]={item=item,action=action};return true end,
++ Attack=function(_,target) commands[#commands+1]={target=target,action=ACTIONS.ATTACK};return true end,
++ Scene=function(_,target,action) commands[#commands+1]={target=target,action=action};return true end}
++package.loaded["shadowself/control/actions"]=A
++require("shadowself/native").context={ENT_util={GetAnimation=function(_,e) return e.anim end}}
++local pauses=0;local stop=0
++local c={player=p,enemies={},observed={},hazards={},snapshot={},gear={},h={IsHitingFrame=function() return p.frame>=8 end},
++ bridge={PauseAttack=function() pauses=pauses+1 end,allowed=function() return true end},
++ actions={SafePoint=function() return true end,Stop=function() stop=stop+1 end},
++ travel={BeginDodge=function() end,EndDodge=function() end},Move=function(self,q,label) self.moved=q;self.status=label end}
++c.mechanisms={Equip=function(_,item) held.hands=item;return true end}
++package.loaded["shadowself/control/bosses"]=nil
++local Boss=require("shadowself/control/bosses");local b=Boss(c);c.bosses=b
++c.Latency=function() return .1 end;c.Speed=function() return 6 end
++
++
++
++local Debug=require("shadowself/control/queendebug")
++local savedPrint=print;local lines={};print=function(line) lines[#lines+1]=line end
++local queen=entity("beequeen");queen.anim="command2"
++local guard=entity("beeguard",6,0);guard.build="bee_guard_puffy_build";guard.anim="run_loop";guard.AnimState.GetBuild=function() return guard.build end
++c.h.ent=queen;c.hazards={};c.enemies={guard};c.bridge.OwnsThread=function() return true end
++local health=1;p.replica.health={GetPercent=function() return health end}
++local q={c=c,queen=queen,phase=3,stage="dash_pull",dash_cycle={mode="pull"},debug_bees={guard}}
++c.beequeen=q;now=100
++Debug.Configure(true);Debug.Start(c,queen);Debug.Sample(q)
++local function count(event)
++ local n=0;for _,line in ipairs(lines) do if line:find('event="'..event..'"',1,true) then n=n+1 end end;return n
++end
++assert(count("fight_start")==1 and count("decision")==1 and count("guards")==1 and count("snapshot")==1 and count("logger_error")==0)
++local size=#lines;for i=1,40 do now=100+i*.01;Debug.Sample(q) end
++assert(#lines==size,"unchanged per-frame sampling must not flood client log")
++now=100.7;health=.8;Debug.Sample(q);assert(count("hurt")==1,"health drop is captured before two-second heartbeat")
++Debug.Performed(c,{action=ACTIONS.ATTACK,target=queen})
++Debug.Performed(c,{action={action=ACTIONS.ATTACK,target=queen}})
++assert(count("attack_performed")==2,"host execution-event shapes are distinguished from dispatch attempts")
++local helditem=entity("icestaff");Debug.Equip(c,"request",helditem,"attack")
++Debug.Equip(c,"ack",helditem,"attack",{latency=.3})
++assert(count("equip_request")==1 and count("equip_ack")==1)
++Debug.Block(c,"select",guard);Debug.Block(c,"CloseAndAttack",guard);Debug.Block(c,"CloseAndAttack",guard)
++assert(count("attack_block")==1,"identical blocked attacks are throttled; select veto is counted without per-bee spam")
++now=100.8;Debug.Move(c,Vector3(15,0,0),"蜂后 · 测试路线")
++local prior=q.stage;local priorpos=p.pos;now=102.1;Debug.Sample(q)
++assert(q.stage==prior and p.pos==priorpos,"logger cannot alter AI phase or player position")
++local joined=table.concat(lines,"\n")
++assert(joined:find('stalled=true',1,true) and joined:find('queen_in_scan=false',1,true),"snapshot explains no movement and retained off-scan queen")
++guard.build="bee_guard_build";guard.anim="walk_loop";now=102.4;Debug.Sample(q);assert(count("guards")==2)
++local before=#lines;for i=1,100 do Debug.Event(c,"spam_test",{index=i}) end
++assert(#lines-before<=24 and c._queen_debug.dropped>0,"event burst has a hard print budget")
++Debug.End(c,"test_done");assert(count("fight_end")==1 and not c._queen_debug)
++Debug.Configure(false);size=#lines;Debug.Start(c,queen);Debug.Event(c,"disabled_test",{});Debug.Sample(q)
++assert(#lines==size and not c._queen_debug,"disabled logging produces no combat entries")
++if write_debug_fixture then write_debug_fixture("OFFLINE TEST FIXTURE - not live gameplay\nLoading mod: Cry for me (offline fixture) Version:0.12.7\n"..table.concat(lines,"\n")) end
++print=savedPrint;package.loaded["shadowself/control/actions"]=savedA;require("shadowself/native").context=savedN
++print("PASS: QueenDebug lifecycle, .2s read-only sampling/2s heartbeat, health/equip/veto records, no per-frame flood, print budget, explicit disable and offline fixture")
+diff --git a/tests/queen_debug_integration.lua b/tests/queen_debug_integration.lua
+new file mode 100644
+index 0000000..1363d48
+--- /dev/null
++++ b/tests/queen_debug_integration.lua
+@@ -0,0 +1,15 @@
++-- 在真实走位/监督/扫描回归运行时打开日志，确认埋点本身也能工作。
++local Debug=require("shadowself/control/queendebug")
++local savedPrint=print;local lines={}
++print=function(line) if type(line)=="string" and line:find("[ShadowSelf][QueenDebug]",1,true) then lines[#lines+1]=line end end
++Debug.Configure(true)
++local ok,why=pcall(assert(loadfile("tests/combat128.lua")))
++Debug.Configure(false);print=savedPrint
++assert(ok,why)
++local text=table.concat(lines,"\n")
++for _,event in ipairs({"fight_start","snapshot","dash_start","dash_end","native_pause","native_resume","attack_block","fight_end"}) do
++ assert(text:find('event="'..event..'"',1,true),"missing integrated diagnostic event "..event)
++end
++assert(not text:find('event="logger_error"',1,true),"logger must not fail during real bridge execution")
++if write_debug_integration_fixture then write_debug_integration_fixture("OFFLINE INTEGRATION FIXTURE - not live gameplay\n"..text) end
++print("PASS: enabled QueenDebug attached to actual native dodge/supervisor/Scan regression emits decisions, movement phases, attack veto and lifecycle without logger errors")
+diff --git a/tests/test_queen_debug_reader.py b/tests/test_queen_debug_reader.py
+new file mode 100644
+index 0000000..6c9220c
+--- /dev/null
++++ b/tests/test_queen_debug_reader.py
+@@ -0,0 +1,41 @@
++from pathlib import Path
++import sys,unittest,json
++sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
++from read_queen_debug import parse,latest_fight,summarize,report_text
++M='[ShadowSelf][QueenDebug] '
++class ReaderTests(unittest.TestCase):
++ def test_fields_and_private_lines(self):
++  rows,version=parse('Loading mod: Cry for me (影子) Version:0.12.7\nPRIVATE_ACCOUNT_LINE\n'+M+'event="snapshot" fight="one" version="0.12.7" t=1.250 reason="蜂后 · 直线跑" busy=false phase=3')
++  self.assertEqual(version,'0.12.7');self.assertEqual(len(rows),1)
++  self.assertEqual(rows[0][0]['reason'],'蜂后 · 直线跑');self.assertEqual(rows[0][0]['t'],1.25)
++  self.assertNotIn('PRIVATE',rows[0][1])
++ def test_latest_reused_session_after_boot(self):
++  text=M+'event="boot"\n'+M+'event="fight_start" fight="one" t=0\n'+M+'event="boot"\n'+M+'event="fight_start" fight="one" t=10'
++  selected=latest_fight(parse(text)[0]);self.assertEqual(len(selected),1);self.assertEqual(selected[0][0]['t'],10)
++ def test_empty_does_not_claim_live_validation(self):
++  report=summarize([], '0.12.6');self.assertIn('尚未读到',report_text(report));self.assertEqual(report['events'],{})
++ def test_blocked_attack_not_dispatched_attack(self):
++  rows,_=parse(M+'event="attack_block" fight="one" phase=3 target="beeguard#8"\n'+M+'event="attack_dispatch" fight="one" phase=3 target="beeguard#8"')
++  report=summarize(rows,None);self.assertEqual(len(report['warnings']),1);self.assertIn('发出守卫攻击',report['warnings'][0])
++ def test_identical_prefab_aba(self):
++  rows,_=parse('\n'.join(M+f'event="equip_request" fight="one" t={i} item="{item}"' for i,item in enumerate(['firestaff#1','firestaff#2','firestaff#1'])))
++  self.assertTrue(any('来回换实体' in warning for warning in summarize(rows,None)['warnings']))
++ def test_normal_cane_restore_no_false_warning(self):
++  rows,_=parse('\n'.join(M+f'event="equip_request" fight="one" t={i} item="{item}"' for i,item in enumerate(['icestaff#1','cane#2','icestaff#1'])))
++  self.assertEqual(summarize(rows,None)['warnings'],[])
++ def test_actual_lua_fixture(self):
++  path=Path(__file__).resolve().parents[1]/'reviews'/'queen-debug-offline-fixture.log'
++  rows,version=parse(path.read_text(encoding='utf8'));selected=latest_fight(rows)
++  self.assertEqual(version,'0.12.7');self.assertTrue(selected)
++  report=summarize(selected,version)
++  self.assertGreater(report['events'].get('snapshot',0),0)
++  self.assertTrue(any('位置未推进' in warning for warning in report['warnings']))
++  self.assertNotIn('logger_error',report['events'])
++ def test_enabled_integration_fixture(self):
++  path=Path(__file__).resolve().parents[1]/'reviews'/'queen-debug-offline-integration.log'
++  rows,_=parse(path.read_text(encoding='utf8'));report=summarize(latest_fight(rows),None)
++  self.assertGreater(report['events'].get('dash_start',0),0)
++  self.assertGreater(report['events'].get('dash_end',0),0)
++  self.assertGreater(report['events'].get('attack_block',0),0)
++  self.assertNotIn('logger_error',report['events'])
++if __name__=='__main__':unittest.main()
+diff --git a/tools/read_queen_debug.py b/tools/read_queen_debug.py
+new file mode 100644
+index 0000000..0d0ae6e
+--- /dev/null
++++ b/tools/read_queen_debug.py
+@@ -0,0 +1,93 @@
++"""只提取 ShadowSelf 蜂后诊断；不复制账户/聊天/网络信息。"""
++from pathlib import Path
++from collections import Counter
++import argparse,json,re,os
++MARKER='[ShadowSelf][QueenDebug]'
++FIELDS=re.compile(r'(\w+)=("(?:\\.|[^"\\])*"|[^\s]+)')
++def default_log():
++    documents=Path.home()/'Documents'
++    if os.name=='nt':
++        import winreg
++        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,r'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders') as key:
++            documents=Path(os.path.expandvars(winreg.QueryValueEx(key,'Personal')[0]))
++    return documents/'Klei'/'DoNotStarveTogether'/'client_log.txt'
++def parse(text):
++    rows=[];boot=0;loaded=None
++    for number,line in enumerate(text.splitlines(),1):
++        match=re.search(r'Loading mod: Cry for me .*Version:([^\s]+)',line)
++        if match:loaded=match.group(1)
++        if MARKER not in line:continue
++        data={}
++        for key,value in FIELDS.findall(line.split(MARKER,1)[1]):
++            try:data[key]=json.loads(value)
++            except (ValueError,TypeError):data[key]=value
++        if data.get('event')=='boot':boot+=1
++        data.update(_boot=boot,_line=number)
++        rows.append((data,line))
++    return rows,loaded
++
++def latest_fight(rows):
++    fights=[(d['_boot'],d['fight']) for d,_ in rows if d.get('fight')]
++    if not fights:return []
++    selected=fights[-1]
++    return [(d,line) for d,line in rows if (d['_boot'],d.get('fight'))==selected]
++
++def summarize(rows,loaded):
++    counts=Counter(d.get('event','unknown') for d,_ in rows)
++    warnings=[];timeline=[];requests=[];snapshots=[]
++    for d,_ in rows:
++        event=d.get('event')
++        if event in ('decision','dash_start','dash_end','queen_solo','flute_request','flute_confirmed','flute_timeout','fight_end'):
++            timeline.append(d)
++        if event=='equip_request':requests.append(d)
++        if event=='snapshot':snapshots.append(d)
++        if event in ('attack_dispatch','attack_performed') and d.get('phase',0)>=3 and str(d.get('target','')).startswith('beeguard#'):
++            warnings.append(f"三阶段发出守卫攻击请求/执行：event={event} t={d.get('t')} target={d.get('target')}")
++        if event=='logger_error':warnings.append('诊断器错误：'+str(d.get('message')))
++    for i in range(2,len(requests)):
++        a,b,c=requests[i-2:i+1];items=[str(x.get('item','')) for x in (a,b,c)]
++        if items[0]==items[2]!=items[1] and len({x.split('#')[0] for x in items})==1 and c.get('t',0)-a.get('t',0)<5:
++            warnings.append(f"相同prefab来回换实体：{items}，t={c.get('t')}")
++    stalls=[d for d in snapshots if d.get('stalled')]
++    if stalls:warnings.append(f"检测到{len(stalls)}次无忙碌状态下有移动目标但位置未推进的采样，需结合路线/受击记录检查。")
++    if counts['equip_timeout']:warnings.append(f"换装确认超时{counts['equip_timeout']}次。")
++    if counts['flute_timeout']:warnings.append(f"全员催眠确认超时{counts['flute_timeout']}次。")
++    return dict(loaded_version=loaded,trace_version=rows[-1][0].get('version') if rows else None,
++                fight=rows[-1][0].get('fight') if rows else None,events=dict(counts),warnings=warnings,
++                timeline=timeline,equipment=requests,snapshots=snapshots)
++
++def report_text(report):
++    lines=['# 蜂后战调试报告','',f"客户端最近加载版本：{report['loaded_version'] or '未读到'}",
++           f"诊断版本：{report['trace_version'] or '未读到'}；战斗：{report['fight'] or '尚无记录'}",'']
++    if not report['events']:
++        lines+=['尚未读到蜂后诊断战斗记录。请加载带QueenDebug的新版本，在调试日志开启时复现一轮蜂后战。','']
++    else:
++        lines+=['事件计数：'+json.dumps(report['events'],ensure_ascii=False),'', '## 检查结果','']
++        lines += ['- '+w for w in report['warnings']] or ['未命中自动检查项；不代表实战行为正确，仍需查看下面的决策/路线。']
++        lines+=['','## 决策时间线','']
++        for d in report['timeline'][-100:]:
++            details=' '.join(f'{key}={d[key]}' for key in ('phase','stage','mode','target','reason','direction','distance') if key in d)
++            lines.append(f"- {d.get('t','?')}s {d.get('event')} {details}")
++        lines+=['','## 最近状态采样','']
++        for d in report['snapshots'][-20:]:
++            details=' '.join(f'{k}={d[k]}' for k in ('phase','stage','mode','queen_anim','queen_frame','distance','guards','boosted','target','busy','held','pending','goal','moved','stalled','dropped') if k in d)
++            lines.append(f"- {d.get('t','?')}s {details}")
++        lines+=['','说明：attack_dispatch是攻击入口调用，attack_performed是可观察到的原版执行事件；仅前者不能证明服务器命中。select_veto只是守卫被排除选敌的次数，属于正常策略。','']
++    return '\n'.join(lines)
++
++def main():
++    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--log',type=Path,default=default_log())
++    parser.add_argument('--out',type=Path,default=Path(__file__).resolve().parents[1]/'reviews'/'queen-debug-latest')
++    parser.add_argument('--all',action='store_true',help='提取全部诊断战斗；默认只提取最近一场')
++    args=parser.parse_args();rows,loaded=parse(args.log.read_text(encoding='utf8',errors='replace'))
++    selected=rows if args.all else latest_fight(rows);result=summarize(selected,loaded)
++    boots=[d for d,_ in rows if d.get('event')=='boot']
++    if boots:
++        result['debug_enabled']=boots[-1].get('enabled')
++        if not selected:result['trace_version']=boots[-1].get('version')
++    args.out.mkdir(parents=True,exist_ok=True)
++    (args.out/'queen-debug.log').write_text('\n'.join(line for _,line in selected)+'\n',encoding='utf8')
++    (args.out/'queen-debug.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf8')
++    (args.out/'queen-debug.md').write_text(report_text(result),encoding='utf8')
++    print(report_text(result));print('报告位置：',args.out)
++if __name__=='__main__':main()
+diff --git a/tools/verify51.py b/tools/verify51.py
+index 32af173..edaa658 100644
+--- a/tools/verify51.py
++++ b/tools/verify51.py
+@@ -12,9 +12,11 @@ for p in ROOT.rglob('*.lua'):
+     assert ok,(p,error)
+ print('PASS: all Lua source compiles with Lua 5.1',flush=True)
+ with zipfile.ZipFile(Path("D:/Steam/steamapps/common/Don't Starve Together/data/databundles/scripts.zip")) as archive:
++    runtime.globals().write_debug_integration_fixture=lambda text:(ROOT/'reviews/queen-debug-offline-integration.log').write_text(text,encoding='utf8')
++    runtime.globals().write_debug_fixture=lambda text:(ROOT/'reviews/queen-debug-offline-fixture.log').write_text(text,encoding='utf8')
+     runtime.globals().read_source=lambda path:archive.read('scripts/'+path).decode('utf8')
+     runtime.globals().read_3014_dodge=lambda:(ROOT/'scripts/shadowself/native/engine/Dodge.lua').read_text(encoding='utf8')
+-    suites=['offline','render_lifecycle','conversation','daily','speech','voice','control','actions_clock','merge','native_merge','coordinator','maxwell','personality','thought_cooking','batch_cooking','navigation','fishing_queen','battlemusic','secondary_travel','dodge_cane','combat103','native_food','grinding','chat_ui','knowledge','combat112','combat114','combat115','combat116','combat117','combat118','combat119','combat120','combat121','combat122','combat123','combat124','combat125','combat126','combat128','native_embedded']
++    suites=['offline','render_lifecycle','conversation','daily','speech','voice','control','actions_clock','merge','native_merge','coordinator','maxwell','personality','thought_cooking','batch_cooking','navigation','fishing_queen','battlemusic','secondary_travel','dodge_cane','combat103','native_food','grinding','chat_ui','knowledge','combat112','combat114','combat115','combat116','combat117','combat118','combat119','combat120','combat121','combat122','combat123','combat124','combat125','combat126','combat128','queen_debug','queen_debug_integration','native_embedded']
+     for name in (sys.argv[2].split(',') if len(sys.argv)>2 else suites):
+         runtime.execute((ROOT/'tests'/f'{name}.lua').read_text(encoding='utf8'))
+ print('PASS: Lua 5.1 regression complete; gameplay remains untested')

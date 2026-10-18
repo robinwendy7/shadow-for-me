@@ -1,0 +1,451 @@
+diff --git a/COMBAT-0.12.14.md b/COMBAT-0.12.14.md
+new file mode 100644
+index 0000000..870d9e7
+--- /dev/null
++++ b/COMBAT-0.12.14.md
+@@ -0,0 +1,20 @@
++# 蜂后战修正 0.12.14
++
++## 本次影响
++
++- 一、二阶段下崽时停止清蜂、冻结和吹箫。等待蜂后 spawn、守卫 spawn_in 完成，且名单稳定至少 0.4 秒，再继续原本流程。等待时已有醒蜂靠近仍会避让。
++- 一阶段高抗守卫被清掉后，补出的整窝先等生成结束，再正常清至一只，保留新个体的独立冻结记录。
++- 二阶段仍使用共同覆盖点催眠。完整站位和路线规划缓存 0.2 秒；不再对已检查过的路径重复运行 Queen:Move 的 24 方向搜索。每帧仍判断能否吹奏和真实攻击前摇，新前摇立即使缓存失效。地形检查放在评分筛选之后，减少重复整段路径检查。
++- 三阶段返身从提前 1 秒缩短为提前约 0.2 秒（command3 第 17 帧，原版第 23 帧清除冲刺）。若已观察到小蜜蜂恢复普通形态，则立即返身。
++- 修复真正的过早返身分支：旧日志中多次在场心约 47 码就因 arena_boundary_return 直接穿回仍在冲刺的蜂群。现在只有实际结束/临近结束才返身；到战场外缘时换一段地形及蜂蜜安全的逃跑直线，维持带蜂，不以触边判定冲刺结束。
++- 新增 spawn_wait_start / spawn_wait_end / dash_boundary_leg 调试事件，继续记录返身时剩余冲刺时间。
++
++## 原版源码依据
++
++本机 data/databundles/scripts.zip：SGbeequeen 的 spawnguards 使用 spawn 动画，第 16 帧生成守卫，第 32 帧解除 busy，但需等动画完成才退出；SGbeeguard 的 spawnin 使用 spawn_in。command3 第 23 帧清除 FocusTarget，因此第 17 帧约剩 0.2 秒。
++
++## 验证范围
++
++Lua 5.1 全量离线回归及调试日志解析测试通过。新增实际 Queen.Tick 补蜂等待测试、真实吹箫流程的生成等待/攻击抢占测试，以及触边仍保持冲刺带蜂测试。固定场景 60 次更新只进行 5 次完整二阶段站位规划。
++
++这是离线模拟和本机源码核对，尚未进行 0.12.14 新版本游戏内实战验证。项目与游戏客户端同步后需完整重启游戏再测试。原版四个血量档中后两档继续共用当前“三阶段”策略。
+diff --git a/modinfo.lua b/modinfo.lua
+index 35afe4f..499b1c4 100644
+--- a/modinfo.lua
++++ b/modinfo.lua
+@@ -1,7 +1,7 @@
+ name = "如影随形(测试版)"
+ description = "安静地跟着你的另一个自己。纯客户端本地影子与离线对话。\n仅聊天输入栏：右键拖动，回车发送。护甲槽上方可战斗接管。"
+ author = "舒晴伊子"
+-version = "0.12.13"
++version = "0.12.14"
+ api_version = 10
+ dst_compatible = true
+ client_only_mod = true
+diff --git a/scripts/shadowself/control/beequeen.lua b/scripts/shadowself/control/beequeen.lua
+index 545c756..ce6c74f 100644
+--- a/scripts/shadowself/control/beequeen.lua
++++ b/scripts/shadowself/control/beequeen.lua
+@@ -28,7 +28,7 @@ function Queen:Anchor(queen)
+     if self.queen==queen then return end
+     require("shadowself/control/queenflute").Reset(self)
+     Debug.End(self.c,"queen_changed")
+-    self.guard_stats={};self.recycle_guard=nil;self.first_route=nil
++    self.guard_stats={};self.recycle_guard=nil;self.first_route=nil;self.spawn_wait=nil
+     self.queen=queen;self.stage="lure";self.lure_since=GetTime();self.side=1
+     self.late=nil;self.phase=1;self.roster={};self.had_roster=nil;self.predicted={};self.was_command=nil;self.piped=nil;self.flute_cycle=nil;self.flute_guards=nil;self.next_flute_scan=nil;self.guard_escape=nil;self.dash_cycle=nil
+     Debug.Start(self.c,queen)
+@@ -186,6 +186,7 @@ function Queen:Tick()
+     local previous_late=self.late;self.late=self.phase>1
+     if self.late and not previous_late then self:Lure(now) end
+     self:Honey(queen,pos,now)
++    if require("shadowself/control/queenspawn").Tick(self,queen,bees,now) then return true end
+     if self.late then self.recycle_guard=nil end
+     local recycle=not self.late and (#bees==1 and GuardControl.Recycle(self,bees[1],now) or self.recycle_guard)
+     local controlling=not recycle and not self.late and #bees==1 and nearest and not Status.Controlled(nearest)
+diff --git a/scripts/shadowself/control/queendash.lua b/scripts/shadowself/control/queendash.lua
+index b7b7ea0..7791d42 100644
+--- a/scripts/shadowself/control/queendash.lua
++++ b/scripts/shadowself/control/queendash.lua
+@@ -1,4 +1,4 @@
+--- 战吼阶段：直线带走，预计结束前一秒直穿回击，守卫追回后等新号令。
++-- 战吼阶段：直线带走，预计结束前0.2秒直穿回击，守卫追回后等新号令。
+ local Status=require("shadowself/control/status")
+ local Nav=require("shadowself/control/navigation")
+ local Route=require("shadowself/control/queendashroute")
+@@ -12,7 +12,7 @@ function D.Dashing(bee)
+  return loco and loco.walkspeed and loco.walkspeed>(TUNING.BEEGUARD_SPEED or 3) or false
+ end
+ local function enter(q,state,queen,pos)
+- state.mode="pull";state.seen_dash=true;state.route=nil;Wave.Start(state);require("shadowself/control/queenroute").Clear(q)
++ state.mode="pull";state.seen_dash=true;state.route=nil;state.edge_leg=nil;Wave.Start(state);require("shadowself/control/queenroute").Clear(q)
+  local qp=queen:GetPosition();local dx,dz=pos.x-qp.x,pos.z-qp.z;local d=math.sqrt(dx*dx+dz*dz)
+  if d<.01 then dx,dz,d=1,0,1 end
+  state.dir={x=dx/d,z=dz/d};q.stage="dash_pull"
+@@ -22,12 +22,32 @@ end
+ function D.Pull(q,state,queen,pos)
+  local c=q.c;local qp=queen:GetPosition();local dir=state.dir;local now=GetTime()
+  local label="蜂后冲锋阶段 · 固定直线远离蜂后带蜂"
++ local homepoint=q.anchor or qp;local leashpoint=math.max(4,(TUNING.BEEQUEEN_DEAGGRO_DIST or 60)-6)
++ local nextpoint=Vector3(pos.x+dir.x*4,0,pos.z+dir.z*4)
++ if nextpoint:DistSq(homepoint)>leashpoint^2 and now>=(state.next_edge or 0) then
++  state.next_edge=now+.2
++  local best,score
++  -- 到场边只更换下一段逃跑直线，不把仍在冲锋的蜂当成已恢复。
++  for i=0,15 do
++   local a=i*math.pi/8;local point=Vector3(pos.x+math.cos(a)*4,0,pos.z+math.sin(a)*4)
++   if point:DistSq(homepoint)<pos:DistSq(homepoint)-.1 and point:DistSq(qp)>=8^2 and Nav.Safe(c,point,queen) then
++    local clearance=math.huge
++    for _,bee in ipairs(q.debug_bees or {}) do clearance=math.min(clearance,point:DistSq(bee:GetPosition())) end
++    local value=math.min(clearance,100)*4+point:DistSq(qp)-point:DistSq(homepoint)*.1
++    if not score or value>score then best,score=point,value end
++   end
++  end
++  if best then
++   state.dir={x=(best.x-pos.x)/4,z=(best.z-pos.z)/4};dir=state.dir;state.edge_leg=true;state.route=nil
++   require("shadowself/control/queendebug").Throttle(c,"dash_boundary_leg",1,"dash_boundary_leg",{home=math.sqrt(pos:DistSq(homepoint))})
++  end
++ end
+  if Route.Reuse(q,state,label,now) then return end
+  local distance=math.sqrt(pos:DistSq(qp));local home=q.anchor or qp
+  local leash=math.max(4,(TUNING.BEEQUEEN_DEAGGRO_DIST or 60)-6)
+  local function forward(point)
+   return (point.x-pos.x)*dir.x+(point.z-pos.z)*dir.z>.2
+-   and point:DistSq(qp)>(distance+.1)^2 and point:DistSq(home)<=leash^2
++   and (state.edge_leg and point:DistSq(qp)>=8^2 or not state.edge_leg and point:DistSq(qp)>(distance+.1)^2) and point:DistSq(home)<=leash^2
+  end
+  local straight=Vector3(pos.x+dir.x*4,0,pos.z+dir.z*4);local goal;local route="straight"
+  if forward(straight) and Nav.Safe(c,straight,queen) then goal=straight end
+@@ -67,15 +87,11 @@ function D.Tick(q,queen,bees,now)
+   if dashing then state.seen_dash=true end
+   local remaining,timing=Wave.Remaining(state,queen)
+   local early=remaining and remaining<=Wave.LEAD
+-  local leash=math.max(4,(TUNING.BEEQUEEN_DEAGGRO_DIST or 60)-6)
+   local home=math.sqrt(pos:DistSq(q.anchor or qp))
+-  local nextpos=Vector3(pos.x+state.dir.x*4,0,pos.z+state.dir.z*4)
+-  -- 不在54码边缘停止等蜂。提前结束本次外移，走原有直穿返身路线。
+-  local boundary=home>=leash-4 or home>=leash-8 and nextpos:DistSq(q.anchor or qp)>(leash-4)^2
+-  local finished=early or boundary or ending or state.seen_dash and not dashing
++  local finished=early or ending or state.seen_dash and not dashing
+   if finished then
+    state.mode="return";state.route=nil;q.stage="dash_return";c.next_move=nil
+-   require("shadowself/control/queendebug").Event(c,"dash_end",{reason=boundary and "arena_boundary_return" or early and "one_second_early:"..timing or ending and "command3_frame23" or "guard_normal",remaining=remaining or -1,home=home,queen_frame=frame,distance=math.sqrt(pos:DistSq(qp))})
++   require("shadowself/control/queendebug").Event(c,"dash_end",{reason=early and "near_release:"..timing or ending and "command3_frame23" or "guard_normal",remaining=remaining or -1,home=home,queen_frame=frame,distance=math.sqrt(pos:DistSq(qp))})
+   else
+    q.stage="dash_pull";D.Pull(q,state,queen,pos)
+    return true
+diff --git a/scripts/shadowself/control/queendebug.lua b/scripts/shadowself/control/queendebug.lua
+index 6f08265..60b8266 100644
+--- a/scripts/shadowself/control/queendebug.lua
++++ b/scripts/shadowself/control/queendebug.lua
+@@ -1,5 +1,5 @@
+ -- 只读蜂后诊断：写入原版client_log，不联网，不发送动作，不逐帧刷日志。
+-local M={VERSION="0.12.13",enabled=false,serial=0}
++local M={VERSION="0.12.14",enabled=false,serial=0}
+ local function now() return GetTime and GetTime() or 0 end
+ function M.Entity(e) return e and (tostring(e.prefab or "?").."#"..tostring(e.GUID or "?")) or "none" end
+ function M.Point(v) return v and string.format("%.2f,%.2f",v.x,v.z) or "none" end
+diff --git a/scripts/shadowself/control/queenflute.lua b/scripts/shadowself/control/queenflute.lua
+index 2b2c20c..41fba12 100644
+--- a/scripts/shadowself/control/queenflute.lua
++++ b/scripts/shadowself/control/queenflute.lua
+@@ -32,7 +32,7 @@ function F.Point(c,queen,bees,range)
+     end end
+     local goal=best or queen:GetPosition();local dx,dz=goal.x-p.x,goal.z-p.z;local d=math.sqrt(dx*dx+dz*dz)
+     if d>3 then goal=Vector3(p.x+dx/d*3,0,p.z+dz/d*3) end
+-    return Nav.Select(c,goal,queen)
++    return goal
+ end
+ local Debug=require("shadowself/control/queendebug")
+ local Safety=require("shadowself/control/queenflutesafety")
+@@ -72,15 +72,33 @@ function F.OnAction(c,data)
+  if act.action==ACTIONS.PLAY then F.Performed(c) end
+ end
+ local function move(q,queen,bees,now,reason,range)
+- local c=q.c;range=range or 15;local goal=F.Point(c,queen,bees,math.max(1,range-.6))
+- local point=Safety.Point(q,queen,bees,goal,now,math.max(1,range-.6))
+- if point then q:Move(point,reason,queen)
++ local c=q.c;range=range or 15
++ local state=q.flute_cycle;local pos=c.player:GetPosition();local cache=state.route
++ local signature={};for _,bee in ipairs(bees) do signature[bee]=true end
++ local same=cache~=nil
++ if cache then
++  for bee in pairs(signature) do if not cache.roster[bee] then same=false end end
++  for bee in pairs(cache.roster) do if not signature[bee] then same=false end end
++ end
++ -- 每帧检查实际前摇，新的攻击立即使缓存失效；普通站位搜索最多每0.2秒一次。
++ local winding=Safety.Imminent(q,queen,bees,pos,Safety.Window(c))
++ if not same or now>=cache.expires or pos:DistSq(cache.start)>6^2
++   or cache.point and pos:DistSq(cache.point)<.25 or winding and not cache.winding then
++  local goal=F.Point(c,queen,bees,math.max(1,range-.6))
++  local point=Safety.Point(q,queen,bees,goal,now,math.max(1,range-.6))
++  cache={point=point,start=pos,expires=now+.2,roster=signature,winding=winding};state.route=cache
++ end
++ if cache.point then
++  -- Safety.Point已检查整段路径，直接提交，避免Queen:Move再次作24方向搜索。
++  require("shadowself/control/queendashroute").Begin(q,state)
++  c:Move(cache.point,reason)
+  else
+   c.blocked=true;c.status="蜂后 · 催眠路线受阻，等待可通行窗口"
+   Debug.Throttle(c,"flute_route_blocked",1,"flute_wait",{reason="no_open_path"})
+  end
+ end
+ function F.Tick(q,queen,bees,flute,now)
++ if require("shadowself/control/queenspawn").Tick(q,queen,bees,now) then return true end
+  local c=q.c;local p=c.player;local pc=p.components.playercontroller;local pos=p:GetPosition()
+  local state=q.flute_cycle or {};q.flute_cycle=state
+  Safety.Observe(q,queen,bees,now)
+diff --git a/scripts/shadowself/control/queenflutesafety.lua b/scripts/shadowself/control/queenflutesafety.lua
+index d36c6fc..1d36fd5 100644
+--- a/scripts/shadowself/control/queenflutesafety.lua
++++ b/scripts/shadowself/control/queenflutesafety.lua
+@@ -87,7 +87,7 @@ function S.Point(q,queen,bees,goal,now,range)
+  local urgent=S.Earliest(q,queen,bees,pos,now)<S.Window(c)
+  local winding=S.Imminent(q,queen,bees,pos,S.Window(c))
+  local function consider(v)
+-  if not v or pos:DistSq(v)<.16 or not Nav.Safe(c,v,queen) then return end
++  if not v or pos:DistSq(v)<.16 then return end
+   if q.anchor and v:DistSq(q.anchor)>40^2 and v:DistSq(q.anchor)>=pos:DistSq(q.anchor) then return end
+   if v:DistSq(queen:GetPosition())>18^2 and v:DistSq(queen:GetPosition())>=pos:DistSq(queen:GetPosition()) then return end
+   if winding and S.Imminent(q,queen,bees,v,S.Window(c)) then return end
+@@ -97,7 +97,7 @@ function S.Point(q,queen,bees,goal,now,range)
+   if not urgent and missing>initial+.02 then return end
+   local deficit=math.max(0,S.Window(c)-eta)
+   local value=missing*missing*1000+S.Shortfall(q,queen,bees,v,now)*1000+deficit*deficit*100+Nav.Risk(c,v,queen)*80+v:DistSq(goal)
+-  if not score or value<score then best,score=v,value end
++  if (not score or value<score) and Nav.Safe(c,v,queen) then best,score=v,value end
+  end
+  consider(goal)
+  for _,d in ipairs({1.5,3,4}) do for i=0,23 do
+diff --git a/scripts/shadowself/control/queenspawn.lua b/scripts/shadowself/control/queenspawn.lua
+new file mode 100644
+index 0000000..0a4fe52
+--- /dev/null
++++ b/scripts/shadowself/control/queenspawn.lua
+@@ -0,0 +1,51 @@
++-- 下崽动画结束且守卫名单稳定后，才允许清蜂/催眠；等待期间仍避近身威胁。
++local S={SETTLE=.4}
++local function anim(e,name) return e.AnimState and e.AnimState:IsCurrentAnimation(name) end
++function S.Tick(q,queen,bees,now)
++ if q.phase and q.phase>=3 then q.spawn_wait=nil;return false end
++ local spawning=anim(queen,"spawn")
++ for _,bee in ipairs(bees) do spawning=spawning or anim(bee,"spawn_in") end
++ local state=q.spawn_wait
++ if spawning and not state then
++  state={roster={}};q.spawn_wait=state
++  require("shadowself/control/queenflute").Reset(q)
++  require("shadowself/control/guardhands").Release(q)
++  if q.c.actions and q.c.actions.Stop then q.c.actions:Stop() end
++  require("shadowself/control/queendebug").Event(q.c,"spawn_wait_start",{guards=#bees,phase=q.phase})
++ end
++ if not state then return false end
++ local changed=false;local roster={}
++ for _,bee in ipairs(bees) do roster[bee]=true;if not state.roster[bee] then changed=true end end
++ for bee in pairs(state.roster) do if not roster[bee] then changed=true end end
++ state.roster=roster
++ if spawning or changed then state.untiltime=now+S.SETTLE end
++ if not spawning and now>=(state.untiltime or now) then
++  q.spawn_wait=nil
++  require("shadowself/control/queendebug").Event(q.c,"spawn_wait_end",{guards=#bees,phase=q.phase})
++  return false
++ end
++ local c=q.c;local pos=c.player:GetPosition();q:Target(queen);c.blocked=true;q.stage="spawn_wait"
++ c.status="蜂后 · 等待本轮下崽结束，再清蜂或催眠"
++ -- 正在生成的蜂不动；已存在的醒蜂仍可能攻击，不能原地硬等。
++ local nearest,distance;local Status=require("shadowself/control/status")
++ for _,bee in ipairs(bees) do
++  if not anim(bee,"spawn_in") and not Status.Controlled(bee) then
++   local d=pos:DistSq(bee:GetPosition())
++   if not distance or d<distance then nearest,distance=bee,d end
++  end
++ end
++ if nearest and distance<4^2 then
++  if not state.point or now>=(state.next_route or 0) or pos:DistSq(state.point)<.25 then
++   local bp=nearest:GetPosition();local dx,dz=pos.x-bp.x,pos.z-bp.z;local len=math.sqrt(dx*dx+dz*dz)
++   if len<.01 then dx,dz,len=1,0,1 end
++   state.point=require("shadowself/control/navigation").Select(c,Vector3(pos.x+dx/len*3,0,pos.z+dz/len*3),queen)
++   state.next_route=now+.2
++  end
++  if state.point then require("shadowself/control/queendashroute").Begin(q,state);c:Move(state.point,c.status);state.moving=true end
++ elseif state.moving then
++  if c.actions and c.actions.Stop then c.actions:Stop() end
++  state.moving=nil;state.point=nil
++ end
++ return true
++end
++return S
+diff --git a/scripts/shadowself/control/queenwave.lua b/scripts/shadowself/control/queenwave.lua
+index 280ccf3..0d706ec 100644
+--- a/scripts/shadowself/control/queenwave.lua
++++ b/scripts/shadowself/control/queenwave.lua
+@@ -1,5 +1,5 @@
+ -- 原版SGbeequeen：command2 -> command1 -> command2 -> command1 -> command3第23帧结束。
+-local W={LEAD=1}
++local W={LEAD=.2}
+ function W.Start(state)
+  state.wave_anim=nil;state.wave_frame=nil;state.command1_count=0
+ end
+diff --git a/tests/combat124.lua b/tests/combat124.lua
+index c56e903..129a606 100644
+--- a/tests/combat124.lua
++++ b/tests/combat124.lua
+@@ -110,7 +110,7 @@ now=5.2;Q:Tick();assert(c.moved.x>22 and math.abs(c.moved.z)>0,"obstacle detour
+ c.actions.SafePoint=function() return false end;now=5.3;Q.dash_cycle.route=nil;Q:Tick();assert(c.blocked and not Q.dash_cycle.route.point,"no outward route holds without repeatedly sending a zero-distance move")
+ c.actions.SafePoint=safe
+ p.pos=Vector3(12,0,0);for _,guard in ipairs(bees) do guard.pos=Vector3(14,0,0) end
+-queen.anim="command3";queen.frame=0;now=5.5;c.next_move=99;Q:Tick();assert(Q.stage=="dash_return" and c.moved.x<12 and c.next_move==nil,"command3 begins inside the one-second return window, before actual boost release")
++queen.anim="command3";queen.frame=17;now=5.5;c.next_move=99;Q:Tick();assert(Q.stage=="dash_return" and c.moved.x<12 and c.next_move==nil,"command3 frame17 enters the 0.2-second return window, before actual boost release")
+ release(queen);for _,guard in ipairs(bees) do assert(guard.build=="bee_guard_build") end
+ queen.frame=23;now=5.53;c.moved=nil;Q:Tick()
+ assert(Q.stage=="dash_return" and c.moved.x<12 and math.abs(c.moved.z)<.001 and c.next_move==nil,"actual dash-end event returns straight to queen in the same tick, ignoring stale move throttle")
+diff --git a/tests/combat128.lua b/tests/combat128.lua
+index ad1f6c3..7b833be 100644
+--- a/tests/combat128.lua
++++ b/tests/combat128.lua
+@@ -101,7 +101,7 @@ local sawqueen=false;local sawguard=false;for _,e in ipairs(c.enemies) do if e==
+ assert(not sawqueen and sawguard,"real scan retains guard as a threat even when it cannot be attacked, queen is outside radius")
+ -- A temporarily absent scan entry does not discard the already tracked boosted guard.
+ p.pos=Vector3(48,0,0);guard.pos=Vector3(46,0,0);guard.tags.hostile=nil;guard.replica.combat.GetTarget=function() return nil end
+-now=10.2;c.next_scan=nil;assert(coroutine.resume(routines[bridge.supervisor]));assert(Q.stage=="dash_return" and c.moved.x<48 and Q.roster[guard],"retain known guards and turn back before the fixed arena boundary blocks outward movement")
++now=10.2;c.next_scan=nil;assert(coroutine.resume(routines[bridge.supervisor]));assert(Q.stage=="dash_pull" and c.moved.x>48 and Q.roster[guard],"retain known guards and continue pulling while boost remains; 48 units is not a return trigger")
+ -- Boost finishes; ignore guard and immediately head toward queen, without clearing it first.
+ guard.build="bee_guard_build";guard.components.locomotor.walkspeed=3;guard.pos=Vector3(50,0,0)
+ now=10.4;c.next_scan=nil;assert(coroutine.resume(routines[bridge.supervisor]));assert(Q.stage=="dash_return" and c.moved.x<48 and c.h.ent==queen and hits==1)
+diff --git a/tests/queen_debug.lua b/tests/queen_debug.lua
+index 5198de2..cc1e0a5 100644
+--- a/tests/queen_debug.lua
++++ b/tests/queen_debug.lua
+@@ -68,6 +68,6 @@ assert(#lines-before<=24 and c._queen_debug.dropped>0,"event burst has a hard pr
+ Debug.End(c,"test_done");assert(count("fight_end")==1 and not c._queen_debug)
+ Debug.Configure(false);size=#lines;Debug.Start(c,queen);Debug.Event(c,"disabled_test",{});Debug.Sample(q)
+ assert(#lines==size and not c._queen_debug,"disabled logging produces no combat entries")
+-if write_debug_fixture then write_debug_fixture("OFFLINE TEST FIXTURE - not live gameplay\nLoading mod: Cry for me (offline fixture) Version:0.12.13\n"..table.concat(lines,"\n")) end
++if write_debug_fixture then write_debug_fixture("OFFLINE TEST FIXTURE - not live gameplay\nLoading mod: Cry for me (offline fixture) Version:0.12.14\n"..table.concat(lines,"\n")) end
+ print=savedPrint;package.loaded["shadowself/control/actions"]=savedA;require("shadowself/native").context=savedN
+ print("PASS: QueenDebug lifecycle, .2s read-only sampling/2s heartbeat, health/equip/veto records, no per-frame flood, print budget, explicit disable and offline fixture")
+diff --git a/tests/queen_flute_recovery.lua b/tests/queen_flute_recovery.lua
+index d937455..59c2ea0 100644
+--- a/tests/queen_flute_recovery.lua
++++ b/tests/queen_flute_recovery.lua
+@@ -22,6 +22,8 @@ local c={player=p,enemies={queen,bee},hazards={},observed={},snapshot={},gear={}
+ c.actions={SafePoint=function() return true end,Stop=function() stops=stops+1 end}
+ c.Latency=function() return .1 end;c.bridge.PauseAttack=function() pauses=pauses+1 end
+ c.travel.EndDodge=function() error("flute handoff must not trigger weapon restoration") end
++c.Move=function(self,v,label) assert(v:DistSq(p.pos)>.15);moves=moves+1;self.point=v;self.blocked=true;self.status=label end
++c.travel.BeginDodge=function() end
+ local q={c=c,queen=queen,phase=2,stage="flute",anchor=queen.pos};c.beequeen=q
+ q.Target=function() c.blocked=false end
+ q.Move=function(_,v,label) assert(v:DistSq(p.pos)>.15,"must actually move, not target current position");moves=moves+1;c.point=v;c.blocked=true;c.status=label end
+@@ -32,7 +34,7 @@ require("shadowself/native").context={POS_util={GoToPoint=function() moves=moves
+ local F=require("shadowself/control/queenflute")
+ local S=require("shadowself/control/queenflutesafety")
+ local function reset()
+- F.Reset(q);c.gear={};c.hazards={};q.stage="flute";q.travelling=nil
++ F.Reset(q);q.spawn_wait=nil;c.gear={};c.hazards={};q.stage="flute";q.travelling=nil
+  p.pos=vec(10,0);p.anim="idle";queen.anim="idle";queen.frame=0;bee.pos=vec(15,0);bee.anim="idle";busy=false;now=now+5
+ end
+ local function tick() return F.Tick(q,queen,{bee},flute,now) end
+@@ -99,12 +101,23 @@ q.Move=oldMove;c.Move=oldCMove
+ -- 日志162.533已结算，162.667动画不同/蜂后仍spawn，守卫已睡：不可误判失败。
+ reset();tick();now=now+1;F.OnAction(c,{action=ACTIONS.PLAY})
+ queen.anim="spawn";bee.anim="sleep_pre";p.anim="idle";busy=true;tick()
+-assert(q.flute_cycle.pending and q.flute_cycle.confirmed,"performed PLAY plus all sleeping guards survives queen no-sleep spawn/animation change")
+-busy=false;now=now+.2;tick();assert(q.flute_cycle.solo and not c.blocked,"already successful guard sleep hands off attacks despite awake queen")
++assert(q.spawn_wait and q.stage=="spawn_wait" and not q.flute_cycle and c.blocked,"spawn preempts old PLAY handoff; wait for the entire new batch")
++busy=false;now=now+.2;tick();assert(q.spawn_wait and c.blocked,"do not attack or blow flute during spawning")
++queen.anim="idle";now=now+.5;tick();assert(not q.spawn_wait,"release only after spawn animation and roster settle")
+ -- 日志171.733推测性追击不该中断已有吹奏，只有真实atk前摇可抢占。
+ reset();tick();now=now+.1;bee.pos=vec(11,0);bee.anim="walk_loop";tick()
+ assert(q.flute_cycle.pending,"moving closer alone does not cancel a committed cast")
+ bee.anim="atk";bee.frame=0;tick();assert(not q.flute_cycle.pending,"actual incoming strike still preempts before frame30")
++-- 中间点规划限频：完整Safety.Point每秒不超过6次，但新攻击当帧使缓存失效。
++reset();p.pos=vec(15.2,0);bee.pos=vec(-8,0)
++local original=S.Point;local plans=0
++S.Point=function(...) plans=plans+1;return original(...) end
++for i=1,60 do now=now+1/60;tick() end
++assert(plans<=6,"60 ticks must reuse a safe midpoint path; plans="..plans)
++local previous=plans;queen.anim="atk";queen.frame=1;p.pos=vec(4,0);tick()
++assert(plans>previous and c.blocked,"new queen windup invalidates cached standing route immediately")
++S.Point=original
++print("PASS: phase2 60-tick midpoint full plans="..previous.."; new windup invalidates cache immediately; spawn blocks PLAY until animation/roster settle")
+ -- 命中日志记录当下帧与距离，不再仅依赖前一条2秒采样。
+ local Debug=require("shadowself/control/queendebug");local oldPrint=print;local lines={}
+ print=function(line) lines[#lines+1]=line end;Debug.Configure(true);Debug.Start(c,queen)
+diff --git a/tests/queen_phase1.lua b/tests/queen_phase1.lua
+index b70c01e..b17ef6f 100644
+--- a/tests/queen_phase1.lua
++++ b/tests/queen_phase1.lua
+@@ -80,7 +80,11 @@ c.gear.forced_weapon=ice;q:Tick();assert(c.target==bee and not c.blocked and not
+ bee.tags.isdead=true;G.Observe(q,{},now+.1);assert(not q.recycle_guard)
+ local fresh={};for i=1,4 do fresh[i]=entity("beeguard",7+i,0) end
+ c.enemies={queen,unpack(fresh)};TheSim.FindEntities=function() return c.enemies end
+-now=now+1;q:Tick();assert(c.target~=queen and q.phase==1 and not q.recycle_guard,"new roster remains first phase and clears normally")
++queen.anim="spawn";now=now+1;q:Tick()
++assert(q.spawn_wait and q.stage=="spawn_wait" and c.target==queen and c.blocked and q.phase==1,"replacement spawn must finish before clearing the new batch")
++queen.anim="idle";fresh[1].anim="spawn_in";now=now+.5;q:Tick();assert(q.spawn_wait and c.blocked,"new guard spawn animation also delays cleanup")
++fresh[1].anim="idle";now=now+.1;q:Tick();assert(q.spawn_wait,"settle interval protects chained spawns")
++now=now+.5;q:Tick();assert(not q.spawn_wait and c.target~=queen and q.phase==1 and not q.recycle_guard,"finished replacement batch resumes cleanup down to one")
+ c.enemies={queen,fresh[1]};p.pos=Vector3(8,0,1);now=now+1;q:Tick()
+ assert(q.guard_stats[fresh[1]].freezes==0 and not q.recycle_guard and c.gear.forced_weapon==ice,"fresh last guard starts with its own control history")
+ -- 无冻结反馈时按实际执行的冰杖攻击计数，等待弹道后结束无效补冰。
+diff --git a/tests/queen_phase3.lua b/tests/queen_phase3.lua
+index 548262b..a28ece1 100644
+--- a/tests/queen_phase3.lua
++++ b/tests/queen_phase3.lua
+@@ -1,4 +1,4 @@
+--- 提前一秒直穿回击 -> 守卫追回后等下一轮，不攻击守卫。
++-- 临近结束前0.2秒直穿回击 -> 守卫追回后等下一轮，不攻击守卫。
+ local savedN=require("shadowself/native").context
+ local now=0;GetTime=function() return now end;FRAMES=1/30
+ TUNING={BEEGUARD_SPEED=3,BEEQUEEN_DEAGGRO_DIST=60}
+@@ -31,8 +31,8 @@ queen.anim="command1";queen.frame=0;now=.1;D.Tick(q,queen,{bee},now)
+ queen.anim="command2";queen.frame=0;now=.2;D.Tick(q,queen,{bee},now)
+ queen.anim="command1";queen.frame=52;now=.3;D.Tick(q,queen,{bee},now)
+ assert(q.stage=="dash_pull","last command still has more than a second, keep pulling")
+-queen.frame=54;now=.333;D.Tick(q,queen,{bee},now)
+-assert(q.stage=="dash_return" and D.Dashing(bee) and c.moved.x==16 and c.moved.z==0,"return about one second early directly through still-boosted guard")
++queen.anim="command3";queen.frame=17;now=.333;D.Tick(q,queen,{bee},now)
++assert(q.stage=="dash_return" and D.Dashing(bee) and c.moved.x==16 and c.moved.z==0,"return only 0.2 seconds early directly through still-boosted guard")
+ local Nav=require("shadowself/control/navigation")
+ assert(not Nav.Safe(c,c.moved,queen),"ordinary navigation still sees guard collision circle; only dedicated return allows this crossing")
+ assert(c.enemies[2]==bee,"crossing does not mutate shared threat list")
+@@ -44,9 +44,9 @@ bee.build="bee_guard_build";bee.pos=Vector3(12,0,0);now=.6;D.Tick(q,queen,{bee},
+ assert(q.stage=="dash_wait" and attacks==1,"normal-form guards returning never restart solo or pull before the next command")
+ bee.build="bee_guard_puffy_build";queen.anim="command2";queen.frame=18;now=1;D.Tick(q,queen,{bee},now)
+ assert(q.stage=="dash_pull" and attacks==1,"new actual boost starts a fresh straight pull cycle")
+--- 缺少前两轮观察时，command3开始仍可提前约0.77秒返回，而非等23帧。
++-- 缺少前两轮观察时，command3开始不再直接返回；等到最后0.2秒。
+ local state={};Wave.Start(state);queen.anim="command3";queen.frame=0
+-local left=Wave.Remaining(state,queen);assert(math.abs(left-23/30)<.001 and left<Wave.LEAD)
++local left=Wave.Remaining(state,queen);assert(math.abs(left-23/30)<.001 and left>Wave.LEAD)
+ -- 三阶段折返缓存：60个固定位置更新仅重新检查少数次直线路径。
+ local R=require("shadowself/control/queendashroute")
+ p.pos=Vector3(20,0,0);bee.pos=Vector3(18,0,0);q.dash_cycle={mode="return"};local cycle=q.dash_cycle
+@@ -60,11 +60,11 @@ assert(not cycle.route.point or cycle.route.point.z~=0 or cycle.route.point.x>=1
+ -- 缓存路线期间也重试先前因busy未执行的赶路换装，使用Travel自己的限频队列。
+ local retries=0;c.travel.dodging=true;c.travel.UpdateDodge=function() retries=retries+1 end
+ R.Begin(q,cycle);assert(retries==1,"cached movement must retry an initially busy cane equip")
+--- 实战home约53.9的卡住：距离边界尚有余量便返身，不等待目标none受击。
++-- 实战home约53.9的卡住：在边缘换一段可通行直线，不提前穿回蜂群。
+ c.hazards={};queen.pos=Vector3(20,0,0);queen.anim="command2";queen.frame=12
+ p.pos=Vector3(53.9,0,0);bee.pos=Vector3(52,0,0);q.dash_cycle={mode="pull",was_dash=true,seen_dash=true,dir={x=1,z=0}}
+ now=10;D.Tick(q,queen,{bee},now)
+-assert(q.stage=="dash_return" and c.moved.x<p.pos.x and D.Dashing(bee),"arena edge causes immediate inward return, never a nil-goal standstill")
++assert(q.stage=="dash_pull" and c.moved:DistSq(q.anchor)<p.pos:DistSq(q.anchor) and D.Dashing(bee),"arena edge changes escape leg but must not return through still-boosted guards")
+ -- 等待远离场心时，在保留蜂群6码/蜂后8码间距的条件下向内回收空间。
+ p.pos=Vector3(50,0,0);bee.pos=Vector3(50,0,10);q.debug_bees={bee};q.dash_cycle={mode="wait",was_dash=false}
+ now=11;R.Wait(q,q.dash_cycle,queen,bee,now)
+@@ -77,4 +77,4 @@ p.pos=Vector3(20,0,0);queen.pos=Vector3(0,0,0);bee.pos=Vector3(18,0,0);queen.ani
+ q.phase=4;q.dash_cycle=nil;now=12;D.Tick(q,queen,{bee},now)
+ assert(q.stage=="dash_pull","native health phase4 continues the same boosted-guard tactic")
+ require("shadowself/native").context=savedN
+-print("PASS: source-order wave timing, one-second early straight return through boosted guards, immediate queen output, catch-up spacing until new boost, no guard attacks, honey protection and 60-tick return path checks="..checks)
++print("PASS: source-order wave timing, near-release 0.2-second straight return through boosted guards, immediate queen output, catch-up spacing until new boost, no guard attacks, honey protection and 60-tick return path checks="..checks)
+diff --git a/tests/test_queen_debug_reader.py b/tests/test_queen_debug_reader.py
+index ff75760..89fb8a1 100644
+--- a/tests/test_queen_debug_reader.py
++++ b/tests/test_queen_debug_reader.py
+@@ -26,7 +26,7 @@ class ReaderTests(unittest.TestCase):
+  def test_actual_lua_fixture(self):
+   path=Path(__file__).resolve().parents[1]/'reviews'/'queen-debug-offline-fixture.log'
+   rows,version=parse(path.read_text(encoding='utf8'));selected=latest_fight(rows)
+-  self.assertEqual(version,'0.12.13');self.assertTrue(selected)
++  self.assertEqual(version,'0.12.14');self.assertTrue(selected)
+   report=summarize(selected,version)
+   self.assertGreater(report['events'].get('snapshot',0),0)
+   self.assertTrue(any('位置未推进' in warning for warning in report['warnings']))

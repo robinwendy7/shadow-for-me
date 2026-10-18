@@ -1,0 +1,148 @@
+diff --git a/COMBAT-0.12.16.md b/COMBAT-0.12.16.md
+new file mode 100644
+index 0000000..5495ac5
+--- /dev/null
++++ b/COMBAT-0.12.16.md
+@@ -0,0 +1,7 @@
++# 蜂后辣闪安全补吃 0.12.16
++
++一阶段继续禁用自动辣闪。二阶段及之后，当蜂后到每只存活守卫的距离都大于 10 码，恢复原有辣闪补吃及增益到期续吃流程。距离以蜂后为中心；睡眠、冰冻守卫同样计入，避免闪电连锁叫醒它们。有任意一只在 10 码内（含边界）就不再新补吃。
++
++生成动画和等待下崽期间保持禁用，避免新守卫尚未同步完整时误判。合并当前扫描、完整守卫名单和已跟踪名单，不额外开启扫描或补吃线程。不移除已经生效的闪电增益。
++
++离线测试覆盖精确距离边界、睡眠/冻结、多守卫、扫描外已知守卫、死亡、生成中、一至四阶段、真实进食提交和增益到期续吃。新版本仍需重启游戏后实战确认。
+diff --git a/modinfo.lua b/modinfo.lua
+index d4e80ee..83b5ebb 100644
+--- a/modinfo.lua
++++ b/modinfo.lua
+@@ -1,7 +1,7 @@
+ name = "如影随形(测试版)"
+ description = "安静地跟着你的另一个自己。纯客户端本地影子与离线对话。\n仅聊天输入栏：右键拖动，回车发送。护甲槽上方可战斗接管。"
+ author = "舒晴伊子"
+-version = "0.12.15"
++version = "0.12.16"
+ api_version = 10
+ dst_compatible = true
+ client_only_mod = true
+diff --git a/scripts/shadowself/control/queendebug.lua b/scripts/shadowself/control/queendebug.lua
+index 550b02e..93fe150 100644
+--- a/scripts/shadowself/control/queendebug.lua
++++ b/scripts/shadowself/control/queendebug.lua
+@@ -1,5 +1,5 @@
+ -- 只读蜂后诊断：写入原版client_log，不联网，不发送动作，不逐帧刷日志。
+-local M={VERSION="0.12.15",enabled=false,serial=0}
++local M={VERSION="0.12.16",enabled=false,serial=0}
+ local function now() return GetTime and GetTime() or 0 end
+ function M.Entity(e) return e and (tostring(e.prefab or "?").."#"..tostring(e.GUID or "?")) or "none" end
+ function M.Point(v) return v and string.format("%.2f,%.2f",v.x,v.z) or "none" end
+diff --git a/scripts/shadowself/control/supplies.lua b/scripts/shadowself/control/supplies.lua
+index 27e4d3b..773ae8d 100644
+--- a/scripts/shadowself/control/supplies.lua
++++ b/scripts/shadowself/control/supplies.lua
+@@ -19,6 +19,28 @@ function Supplies:Active(name,untiltime)
+     if d and d.HasDebuff then return d:HasDebuff(name) end
+     return GetTime()<(untiltime or 0)
+ end
++-- 睡眠不排除：这里判断的是闪电连锁会不会波及守卫，而不是守卫是否有威胁。
++function Supplies:QueenBlocksChili()
++    local c=self.c;local q=c.beequeen;local queen
++    for _,e in ipairs(c.enemies or {}) do
++        if e.prefab=="beequeen" and e:IsValid() and not e:HasTag("isdead") and not e:HasTag("dead") then queen=e;break end
++    end
++    if not queen and c.queen_active and q then queen=q.queen end
++    if not queen or not queen:IsValid() or queen:HasTag("isdead") or queen:HasTag("dead") then return false end
++    -- 一阶段维持禁用；下崽尚未结束时不能把尚未同步完整的名单当成安全距离。
++    if not q or q.queen~=queen or (q.phase or 1)<2 or q.spawn_wait
++        or queen.AnimState and queen.AnimState:IsCurrentAnimation("spawn") then return true end
++    local qp=queen:GetPosition()
++    local function near(e)
++        if e.prefab~="beeguard" or not e:IsValid() or e:HasTag("isdead") or e:HasTag("dead") or e:HasTag("INLIMBO") then return false end
++        local health=e.replica and e.replica.health
++        return not (health and health.IsDead and health:IsDead()) and qp:DistSq(e:GetPosition())<=10^2
++    end
++    for _,e in ipairs(q.debug_bees or {}) do if near(e) then return true end end
++    for e in pairs(q.roster or {}) do if near(e) then return true end end
++    for _,e in ipairs(c.enemies or {}) do if near(e) then return true end end
++    return false
++end
+ function Supplies:Tick()
+     local now=GetTime();local state=self.state;local pc=self.player.components.playercontroller
+     local pending=self.pending
+@@ -38,13 +60,10 @@ function Supplies:Tick()
+         end
+     end
+     local electric=self:Active("buff_electricattack",state.electric_until)
+-    -- 蜂后一阶段及后续群蜂阶段都不自动补吃辣闪；不清除玩家已获得的增益。
+-    local queenfight=false
+-    for _,e in ipairs(self.c.enemies or {}) do
+-        if e.prefab=="beequeen" and e:IsValid() and not e:HasTag("isdead") and not e:HasTag("dead") then queenfight=true;break end
+-    end
++    -- 二阶段起，蜂后与所有守卫相隔超过10码才恢复普通补吃/续buff流程。
++    local block_chili=self:QueenBlocksChili()
+     local preferred
+-    for _,i in ipairs(A.Items(self.player)) do if jelly(i) and i:IsValid() and not (queenfight and i.prefab=="voltgoatjelly_spice_chili") then
++    for _,i in ipairs(A.Items(self.player)) do if jelly(i) and i:IsValid() and not (block_chili and i.prefab=="voltgoatjelly_spice_chili") then
+         if not preferred or i.prefab=="voltgoatjelly_spice_chili" then preferred=i end
+     end end
+     if not preferred then return false end
+diff --git a/tests/combat123.lua b/tests/combat123.lua
+index 9a5041c..d6069c0 100644
+--- a/tests/combat123.lua
++++ b/tests/combat123.lua
+@@ -116,9 +116,30 @@ package.loaded["shadowself/control/supplies"]=nil
+ local chili=entity("voltgoatjelly_spice_chili");items={chili};c.enemies={queen};c.observed={};c.travel={};c.bridge.chasing=nil
+ p._shadowself_combat_buffs=nil;local Supply=require("shadowself/control/supplies");local supply=Supply(c)
+ now=20;assert(not supply:Tick() and eats==0,"first stage never consumes spicy jelly")
+-first.phase=2;assert(not supply:Tick() and eats==0,"second stage never consumes spicy jelly")
++first.phase=2;assert(not supply:Tick() and eats==0,"second stage near sleeping guards suppresses spicy jelly")
+ c.enemies={entity("deerclops")};assert(supply:Tick() and eats==1 and supply.pending,"other boss combat retains spicy jelly")
+ items={};c.enemies={queen};now=20.1;supply:Tick();assert(supply.state.electric_until,"already submitted food still uses inventory confirmation")
++-- 所有距离用蜂后到守卫计算，不用玩家距离，也不忽略睡眠/冻结守卫。
++local savedDebug,savedRoster=first.debug_bees,first.roster
++local nearBee=entity("beeguard");nearBee.pos=Vector3(10,0,0);nearBee.anim="sleep_loop"
++queen.pos=Vector3(0,0,0);queen.anim="idle";first.phase=2;first.debug_bees={nearBee};first.roster={[nearBee]=true};c.enemies={queen}
++assert(supply:QueenBlocksChili(),"exactly10 units still blocks sleeping guards")
++nearBee.pos=Vector3(10.01,0,0);assert(not supply:QueenBlocksChili(),"all guards strictly farther than10 restores food")
++nearBee.anim="frozen";nearBee.pos=Vector3(9,0,0);assert(supply:QueenBlocksChili(),"frozen guards are still chain-lightning victims")
++local otherBee=entity("beeguard");otherBee.pos=Vector3(-9,0,0);nearBee.pos=Vector3(15,0,0)
++first.debug_bees={nearBee};first.roster={[nearBee]=true,[otherBee]=true}
++assert(supply:QueenBlocksChili(),"known nearby guard outside current scan prevents consumption")
++otherBee.tags.isdead=true;assert(not supply:QueenBlocksChili(),"dead guard does not suppress food")
++first.spawn_wait={};assert(supply:QueenBlocksChili(),"incomplete spawn roster never enables chili")
++first.spawn_wait=nil;queen.anim="spawn";assert(supply:QueenBlocksChili());queen.anim="idle"
++for _,phase in ipairs({3,4}) do first.phase=phase;assert(not supply:QueenBlocksChili(),"later phases use the same10-unit safety gate") end
++first.phase=1;assert(supply:QueenBlocksChili(),"first phase remains disabled even with enough separation")
++first.phase=2;items={chili};p._shadowself_combat_buffs=nil;local farSupply=Supply(c);now=24
++assert(farSupply:Tick() and eats==2 and farSupply.pending,"separated queen/guards restores actual original EAT submission")
++items={};now=24.1;farSupply:Tick();assert(farSupply.state.electric_until,"restored chili still waits for inventory confirmation")
++-- Buff到期之后依旧经过同一距离门槛，不另建补吃线程。
++items={chili};now=farSupply.state.electric_until+1;assert(farSupply:Tick() and eats==3,"safe separation also allows normal buff renewal")
++first.debug_bees=savedDebug;first.roster=savedRoster;first.phase=2;items={};now=25
+ -- Real bridge target and captured-victim gates, followed by the actual supervisor loop.
+ local Co=require("shadowself/control/coordinator");local savedCo=package.loaded["shadowself/control/coordinator"]
+ local oldStart,oldSleep,oldKill,oldPaused=StartThread,Sleep,KillThreadsWithID,IsSimPaused
+diff --git a/tests/queen_debug.lua b/tests/queen_debug.lua
+index 2d6d0b6..adb1c6f 100644
+--- a/tests/queen_debug.lua
++++ b/tests/queen_debug.lua
+@@ -68,6 +68,6 @@ assert(#lines-before<=24 and c._queen_debug.dropped>0,"event burst has a hard pr
+ Debug.End(c,"test_done");assert(count("fight_end")==1 and not c._queen_debug)
+ Debug.Configure(false);size=#lines;Debug.Start(c,queen);Debug.Event(c,"disabled_test",{});Debug.Sample(q)
+ assert(#lines==size and not c._queen_debug,"disabled logging produces no combat entries")
+-if write_debug_fixture then write_debug_fixture("OFFLINE TEST FIXTURE - not live gameplay\nLoading mod: Cry for me (offline fixture) Version:0.12.15\n"..table.concat(lines,"\n")) end
++if write_debug_fixture then write_debug_fixture("OFFLINE TEST FIXTURE - not live gameplay\nLoading mod: Cry for me (offline fixture) Version:0.12.16\n"..table.concat(lines,"\n")) end
+ print=savedPrint;package.loaded["shadowself/control/actions"]=savedA;require("shadowself/native").context=savedN
+ print("PASS: QueenDebug lifecycle, .2s read-only sampling/2s heartbeat, health/equip/veto records, no per-frame flood, print budget, explicit disable and offline fixture")
+diff --git a/tests/test_queen_debug_reader.py b/tests/test_queen_debug_reader.py
+index bf3b21c..92850cd 100644
+--- a/tests/test_queen_debug_reader.py
++++ b/tests/test_queen_debug_reader.py
+@@ -26,7 +26,7 @@ class ReaderTests(unittest.TestCase):
+  def test_actual_lua_fixture(self):
+   path=Path(__file__).resolve().parents[1]/'reviews'/'queen-debug-offline-fixture.log'
+   rows,version=parse(path.read_text(encoding='utf8'));selected=latest_fight(rows)
+-  self.assertEqual(version,'0.12.15');self.assertTrue(selected)
++  self.assertEqual(version,'0.12.16');self.assertTrue(selected)
+   report=summarize(selected,version)
+   self.assertGreater(report['events'].get('snapshot',0),0)
+   self.assertTrue(any('位置未推进' in warning for warning in report['warnings']))

@@ -1,0 +1,25 @@
+-- 动画用于本地演员；复活时仅对 owner 使用本机透明覆盖，不改服务器状态。
+return {
+    tick=.05, scan=.8, radius=20, near=2, far=4, speed=7.2,
+    leash=15, catch_stop=7, walk_speed=3.2, hard_teleport=50, stuck_time=2, event_ttl=14, queue_limit=12,
+    category_cooldown=65, repeat_cooldown=240, idle_talk=150,
+    burrow_end=21/30, rebirth_reappear=86/30,
+    animations={
+        follow={"run_loop",true}, idle={"idle_loop",true},
+        watch={"idle_inaction",true}, tense={"idle_inaction",true},
+        warm={"idle_loop",true}, sit={"emote_loop_sit1",true},
+        look={"idle_inaction",true}, circle={"run_loop",true},
+        hurt={"hit",false}, eat={"eat",false},
+        mourn={"emote_sad",false}, relief={"emote_happycheer",false},
+    },
+    action_anims={chop_loop="chop",chop="chop",mine_loop="mine",mine="mine",
+        atk="attack",attack="attack",eat="eat",hit="hurt",death="death"},
+    priorities={death=100,revive=100,amulet=100,boss=90,hurt=85,runaway=80,
+        nightmare=80,hunger=65,sanity=65,attack=60,monster=60,
+        chop=30,mine=30,eat=40,fire=35,night=45,rain=30,snow=30,
+        cave=75,region=25,spawn=20,despawn=20,building=20,season=30,
+        terrain=25,day=20,dusk=25,idle=5,greeting=10},
+    postures={hurt="tense",attack="watch",boss="tense",monster="tense",
+        nightmare="tense",runaway="tense",chop="watch",mine="watch",eat="eat",
+        fire="warm",region="look",terrain="look",night="look",sanity="tense"},
+}

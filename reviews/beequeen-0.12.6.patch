@@ -1,0 +1,344 @@
+diff --git a/COMBAT-0.12.6.md b/COMBAT-0.12.6.md
+new file mode 100644
+index 0000000..6a7097f
+--- /dev/null
++++ b/COMBAT-0.12.6.md
+@@ -0,0 +1,13 @@
++# 0.12.6 三阶段只带冲刺守卫，不打守卫
++
++修正两个实际入口：常规选敌仍允许活动小蜜蜂，原生DoDodge结束还可能对进入躲避时捕获的旧小蜜蜂补刀；直线带到24码外后，扫描里看不到蜂后又可能丢失专属战斗状态。
++
++- 三阶段蜂后仍有效时，beeguard在选敌入口被排除，优先目标、恢复目标和对话指定目标不能绕过它。攻击帧、普通帧、走位补刀和走位内攻击也检查实际受击对象，阻止旧目标小蜜蜂被补刀。
++- 守卫仍参加威胁观察，不因禁止攻击从环境中消失。已识别的存活守卫在三阶段持续跟踪；蜂后仍有效但超出常规24码扫描时保留其战斗状态。
++- 小蜜蜂实际进入膨胀冲刺形态/速度才开始直线带离；普通形态追近不触发另一轮拉扯，也不成为攻击目标。
++- 小蜜蜂恢复普通形态/速度，或蜂后command3第23帧解除冲刺，当次更新折返找蜂后；不先处理、不清理小蜜蜂。不再用普通守卫队形作为本轮返身前置条件。
++- 一阶段清蜂/冻蜂和二阶段中间点排箫保持；手杖/法杖串行换装和同类法杖固定实体选择保持。
++
++验证：tests/combat128.lua加载实际原生DoDodge，验证捕获旧守卫的结束补刀被拒绝；接入实际Supervisor、Scan、NativePulse，验证32/48码外蜂后状态保持、临时扫描缺失的已知守卫保持、冲刺结束立刻返身、普通守卫靠近仍打蜂后、下一次真实冲刺才重新带走。同时运行完整Lua 5.1回归。属于离线联动模拟，非实机战斗验证。
++
++报告 reviews/beequeen-0.12.6-validation.txt；Git差异 reviews/beequeen-0.12.6.patch。
+diff --git a/modinfo.lua b/modinfo.lua
+index 3a6e6a7..04632dc 100644
+--- a/modinfo.lua
++++ b/modinfo.lua
+@@ -1,7 +1,7 @@
+ name = "如影随形(测试版)"
+ description = "安静地跟着你的另一个自己。纯客户端本地影子与离线对话。\n仅聊天输入栏：右键拖动，回车发送。护甲槽上方可战斗接管。"
+ author = "舒晴伊子"
+-version = "0.12.5"
++version = "0.12.6"
+ api_version = 10
+ dst_compatible = true
+ client_only_mod = true
+diff --git a/reviews/beequeen-0.12.6-validation.txt b/reviews/beequeen-0.12.6-validation.txt
+new file mode 100644
+index 0000000..a1034ef
+--- /dev/null
++++ b/reviews/beequeen-0.12.6-validation.txt
+@@ -0,0 +1,57 @@
++验证类型：完整Lua 5.1离线回归；实际原生走位、监督与扫描模块联动；非实机战斗验证。
++PASS: all Lua source compiles with Lua 5.1
++PASS: 419 assertions; 52 categories; 260 expressions; 524288 context parameters
++PASS: local actor movement, wait, lift, death, return, transition and effects cleanup
++PASS: 84 conversation cases; 89 new intents; 1110 phrase/group entries; followup and reply coverage
++PASS: 59 additional daily topics, 177 authored replies; slang normalization; existing negation/death semantics preserved
++PASS: speech follows actor, UTF8 pages, buried/pause timers and dialogue routing
++PASS: native prefab/alias/override paths, Wes silence, ghost, per-page local voice, interrupt/pause/hide/cleanup; native player talk channel untouched
++PASS: takeover consent, expiry, cancel, possession, stop/death; native combat bridge ownership/filter/settings
++PASS: native action callbacks, revoked callback, authoritative crafting and synchronized rebirth timelines
++PASS: imported zom multi-step/count parser, queue cancellation, AI Player priority decisions
++PASS: Lua 5.1 native Class/picker, imported AI initialization, hunger decision, server confirmation and cancellation: 11
++PASS: imported queue native scene callback invalidated on cancel
++PASS: autonomous 3014 entry, exclusive thread control, no health-threshold retreat and cancel
++PASS: real AI Player travel gear, synchronized weapon restoration and darkness light
++PASS: real equipment busy/late busy never blacklists; first recovered frame retries; stale travel acknowledgement releases
++PASS: actual equipment/inventory cane acknowledgement, hold while dodging near target, native exit weapon acknowledgement
++PASS: original AI group gather/evade/punish, off-target danger and focal shadow sound
++PASS: native combat hooks restored; work defense invalidates callbacks and preserves craft request
++PASS: Maxwell native CASTAOE slots, Boss/mob control, velocity sampling, pillars renewal, miss fallback, exclusions, host and cancel
++PASS: book-only range and armed native combat mode
++PASS: 16 profiles / 448 authored lines, text personality selection, commands, fixed text, frequency and save
++PASS: fresh context, recent-meal vs real hunger, negated joke, mood, silence, bounded memory and factual questions
++PASS: concurrent distinct pots before first completion; fair empty-pot rotation; powder reserved per pending base meal; exhaustion waits for all cooked/seasoned output; existing harvest, synchronized storage and cancel
++PASS: four ingredients submitted in the same call; acknowledged at 50ms response; no duplicate in-flight request; reopened storage synchronization preserved
++PASS: native chest/cooker coexistence; eight direct ingredients across two pots; one fridge open; far-container batch withdrawal; native open-source/destination checks; cancel cleanup
++PASS: repeated hits ask consent; ongoing care without forced possession or duplicate requests
++PASS: real batch bridge sends four exact native RPCs in one call; host path, closed source, revoked guard and four-slot cap
++PASS: left/right pincer -> third direction; short escape commitment avoids oscillation; third enemy and honey route checks
++PASS: rod equip, pond wait/hook/reel, ocean tension/reel/catch/recast, pause/cancel; queen first roster/last freeze/pipe, bounded straight lure, player-queen-guard formation, fixed cutback, command edge, timed return, fixed arena and honey avoidance
++PASS: battle BGM opt-out, live mixer .7/.2/0/1 gain, no restart, profile music fallback and stop
++PASS: native solo untouched; other real windup priority; group third direction/native distance; stable table; idle fallback ignored; cane chase/goto hysteresis, hit and danger suppression
++PASS: real 3014 dodge events equip cane after initial busy, preserve all 8 movement frames, restore weapon once before follow-up
++PASS: real 3014 fixed straight charge; interrupted equip/hit recovery; unsafe attack moves; surrounded exit; recovery vs active path
++PASS: actual installed game cooking tests, 11 Warly specialties, 316 registered seasoned products; jelly and dragon-chili salad ingredient solutions
++PASS: native builder replica: KnowsRecipe=false + CanLearn + accessible FOODPROCESSING permits powder; role/materialPASS: Lua 5.1 regression complete; gameplay remains untested
++/tech errors distinct; delayed tech sync, single crafting request, powder receipt and host path
++PASS: input-only chat, no transcript/history, enter-only send, right drag/save/resize; feet consent and stop retained
++PASS: local-shadow right-click -> head MBTI button -> sixteen choices, restore, timeout, possession/buried hiding and saved personality migration
++PASS: armor-slot combat button follows inventory rebuild/scale, starts/stops, and blocks ghost clicks
++PASS: grounded recipe, material deficit, carried+equipped count, recipe uses, builder conditions, item followup and execution-command isolation
++PASS: timed spore/spike defence, shark arc, bone chomp window, single blink/shell/missile drain, loot and exclusive chase/attack/manual boat phases
++PASS: walrus dogs/retreat/rush, sliding penguin sleep confirmation, charged-goat insulation/circle/bait/punish, confirmed jelly/chili refresh and non-blocking failed food
++PASS: 0.11.3 boss phase scenarios, queen colon callback, stable insulation, early bomb, vines, tentacle bait, Wonkey ownership and coast room; not live gameplay
++PASS: one antlion sidestep, fan flank, early glass-free spin, fixed lateral lunar lane, full crystal blast, leap-before-bait, early bomb, real walrus target loss and staff ATTACK
++PASS: ranged/torch early ignition, bare/regrown crystal, attached bomb registry and moving escape, wave-wide attack hold, tired/wake/vine/shell, bishop arc flank, possessed varg, bee freeze/queen pursuit and real planar/jelly weapon ranking
++PASS: bare eye vs arm regrowth, fume event/child fallback and real bomb movement ticks, exclusive queen gear owner, ten-guard long straight pull, antlion clear-side/backtracking, continuous weak-head output, bishop circle exit, fixed lunar lane and four warg variants
++PASS: real freeze animation/safe staff range, serial same-wave ghost pairs, late bomb/landing movement, weak-head follow-up ownership, close crystal flank and source-timed rabbit king charge/stuck/burrow/minions
++PASS: actual scheduler self-pause/Sleep reproduction, pure weak-head pulse, distinct ground mushroom explosives, off-target rook/kick lanes, lateral-only pair lock, inward second crystal throw, complete-swipe hold, honey exit and persistent ten-guard lure
++PASS: actual shipped ordinary-deer entry and exact frame window, struggle-pre weapon release, visual weak-head/middle recovery and actual supervisor attack/dodge/resume across mushroom growth and fuse
++PASS: antlion connected neck exit/future segment/short sidestep; idle-queen-range freeze, bee-centered orbit, attack-windup defence and immediate frozen handoff
++PASS: actual game instrument/hearing/frame30 and busy52; full-roster coverage, missing bee, confirmed sleep/solo/wake/retry/last-use; sleeping target and captured victim rejection; spicy-jelly suppression; actual native supervisor pause/resume
++PASS: freeze threat interrupts busy/cooldown and holds through impact; stage2 restored full-coverage midpoint and immediate wake repositioning; real FocusTarget/build/speed and frame23 release drive fixed straight phase3 pull past old leash, outward-only obstacle detour and immediate return/solo/rejoin cycle
++PASS: actual Gear/Travel/Queen with 300ms and 900ms delayed equip acknowledgement; repeated move/fight events cannot alternate cane/ice; one cane escape and one ice restore; movement continuous; freeze release retains ordinary cane/sword selection
++PASS: real inventory-first/equip-last enumeration with two ice/fire staffs; delayed cane restore retains exact selected entity; held/pending preference, broken/missing replacement and crystal support selection
++PASS: third-phase guard target veto before all overrides; actual native DoDodge captured-target follow-up blocked; actual supervisor/Scan retain queen beyond24 and known guards; boost-only pull, immediate normal-form return and close normal guards ignored
++PASS: actual embedded engine and all support modules initialise under actual strict.lua, cached host RPC dispatch, remote RPC fallback and no external mod globals
+diff --git a/scripts/shadowself/control/beequeen.lua b/scripts/shadowself/control/beequeen.lua
+index 53b2e39..6ab0432 100644
+--- a/scripts/shadowself/control/beequeen.lua
++++ b/scripts/shadowself/control/beequeen.lua
+@@ -9,6 +9,13 @@ function Queen:Target(e)
+     local c=self.c;c.target=e;self.allow=e;c.blocked=false;c.bridge.priority_target=e
+     if c.h.ent~=e then c.h.ent=e;c.bridge.wrappers.PreTheLoop.old(c.h) end
+ end
++-- 三阶段守卫只参与威胁观察，不得成为选敌或原生走位补刀目标。
++function Queen:GuardAttackBlocked(e)
++ local queen=self.queen
++ local health=queen and queen.replica and queen.replica.health
++ return e and e.prefab=="beeguard" and self.phase and self.phase>=3 and queen and queen:IsValid()
++  and not queen:HasTag("isdead") and not queen:HasTag("dead") and not (health and health.IsDead and health:IsDead()) or false
++end
+ function Queen:Item(prefab)
+  self.item_choice=self.item_choice or {}
+  local p=self.c.player;local gear=self.c.gear
+@@ -120,6 +127,8 @@ function Queen:Tick()
+     if self.c.gear then self.c.gear.forced_weapon=nil end
+     local c=self.c;local queen
+     for _,e in ipairs(c.enemies) do if e.prefab=="beequeen" and c.bridge.allowed(e) then queen=e;break end end
++    -- 直线带蜂会超过24码常规选敌半径，不能因此丢失仍有效的蜂后战。
++    if not queen and self.phase and self.phase>=3 and self.queen and self.queen:IsValid() and c.bridge.allowed(self.queen) then queen=self.queen end
+     if not queen then GuardHands.Release(self);self.allow=nil;self.flute_cycle=nil;self:ReleaseTravel();return false end
+     self:Anchor(queen)
+     local p=c.player;local pos=p:GetPosition();local qp=queen:GetPosition();local now=GetTime()
+@@ -134,6 +143,9 @@ function Queen:Tick()
+         end
+     end
+     collect(c.enemies)
++    if self.phase>=3 then
++        for known in pairs(self.roster or {}) do collect({known}) end
++    end
+     -- 常规战斗只扫描24码；排箫不能漏掉战场另一侧的守卫。
+     if flute or self.flute_cycle or self.phase>=3 then
+         if now>=(self.next_flute_scan or 0) then
+diff --git a/scripts/shadowself/control/combat.lua b/scripts/shadowself/control/combat.lua
+index 5caa79f..3424407 100644
+--- a/scripts/shadowself/control/combat.lua
++++ b/scripts/shadowself/control/combat.lua
+@@ -21,6 +21,8 @@ function Bridge:Start(plan,matches)
+     self.plan=plan;self.clear_since=nil;self.next_finish_scan=nil;self.finished=false
+     local function allowed(e)
+         if not e or not e:IsValid() or e==self.player or e:HasTag("player") or e:HasTag("playerghost") then return false end
++        local queen=self.coordinator and self.coordinator.beequeen
++        if queen and queen.GuardAttackBlocked and queen:GuardAttackBlocked(e) then return false end
+         if e.prefab=="beeguard" and require("shadowself/control/status").Sleeping(e) then return false end
+         if e.prefab=="icehound" or e.prefab=="firehound" then
+             local a=e.AnimState
+@@ -250,6 +252,7 @@ function Bridge:Coordinate(plan)
+             local c=self.coordinator
+             if self.pause_requested then return false end
+             local explicit=...;local victim=(name=="CloseAndAttack" or name=="ShouldAtkWhenDodging") and type(explicit)=="table" and explicit.prefab and explicit or object.ent
++            if c.beequeen and c.beequeen.GuardAttackBlocked and c.beequeen:GuardAttackBlocked(victim) then return false end
+             if victim and c.bosses and c.bosses.AttackBlocked and c.bosses:AttackBlocked(victim) then return false end
+             if victim and victim.prefab=="beeguard" and c.beequeen and c.beequeen.queen and (require("shadowself/control/status").Frozen(victim) or require("shadowself/control/status").Sleeping(victim)) then return false end
+             if object.ent and not self.allowed(object.ent) then return false end
+diff --git a/scripts/shadowself/control/queendash.lua b/scripts/shadowself/control/queendash.lua
+index dae0355..36f7833 100644
+--- a/scripts/shadowself/control/queendash.lua
++++ b/scripts/shadowself/control/queendash.lua
+@@ -9,8 +9,8 @@ function D.Dashing(bee)
+  local loco=bee.components and bee.components.locomotor
+  return loco and loco.walkspeed and loco.walkspeed>(TUNING.BEEGUARD_SPEED or 3) or false
+ end
+-local function enter(q,state,queen,pos,roar)
+- state.mode="pull";state.seen_dash=nil;state.wait_dash=roar
++local function enter(q,state,queen,pos)
++ state.mode="pull";state.seen_dash=true
+  local qp=queen:GetPosition();local dx,dz=pos.x-qp.x,pos.z-qp.z;local d=math.sqrt(dx*dx+dz*dz)
+  if d<.01 then dx,dz,d=1,0,1 end
+  state.dir={x=dx/d,z=dz/d};q.stage="dash_pull"
+@@ -43,24 +43,24 @@ end
+ function D.Tick(q,queen,bees,now)
+  local c=q.c;local p=c.player;local pos=p:GetPosition();local qp=queen:GetPosition()
+  local state=q.dash_cycle or {mode="solo"};q.dash_cycle=state
+- local a=queen.AnimState;local roar=a:IsCurrentAnimation("command1") or a:IsCurrentAnimation("command2") or a:IsCurrentAnimation("command3")
++ local a=queen.AnimState
+  local frame=a.GetCurrentAnimationFrame and a:GetCurrentAnimationFrame() or 0
+  local ending=a:IsCurrentAnimation("command3") and frame>=23
+- local dashing=false;local near=math.huge;local awake=false
++ local dashing=false;local awake=false
+  for _,bee in ipairs(bees) do
+   dashing=D.Dashing(bee) or dashing
+-  if not Status.Sleeping(bee) and not Status.Frozen(bee) then awake=true;near=math.min(near,math.sqrt(pos:DistSq(bee:GetPosition()))) end
++  if not Status.Sleeping(bee) and not Status.Frozen(bee) then awake=true end
+  end
+- local new_roar=roar and not state.was_roar;local new_dash=dashing and not state.was_dash
+- state.was_roar=roar;state.was_dash=dashing
++ local new_dash=dashing and not state.was_dash
++ state.was_dash=dashing
+  q:Target(queen)
+  if not awake then state.mode="solo" end
+- if awake and ((new_roar and not ending) or new_dash and state.mode~="pull" and not ending) then enter(q,state,queen,pos,true) end
+- if state.mode=="solo" and awake and near<6 then enter(q,state,queen,pos,false) end
++ -- 只在守卫实际进入冲刺时带走。普通守卫追近不重新拉扯、不切换攻击目标。
++ if awake and new_dash and not ending then enter(q,state,queen,pos) end
+  if state.mode=="pull" then
+   if dashing then state.seen_dash=true end
+   local finished=ending or state.seen_dash and not dashing
+-  if finished or not state.wait_dash and not dashing and q:Formation(queen,bees,pos) then
++  if finished then
+    state.mode="return";q.stage="dash_return";c.next_move=nil
+   else
+    q.stage="dash_pull";D.Pull(q,state,queen,pos)
+diff --git a/tests/combat124.lua b/tests/combat124.lua
+index 8542b1e..3a8ecc7 100644
+--- a/tests/combat124.lua
++++ b/tests/combat124.lua
+@@ -117,7 +117,7 @@ assert(Q.stage=="dash_return" and c.moved.x<12 and math.abs(c.moved.z)<.001 and
+ -- Return does not wait for an artificial player/queen/guard ordering.
+ p.pos=Vector3(2,0,0);queen.anim="idle";now=5.8;Q:Tick();assert(Q.stage=="strike" and not c.blocked and c.target==queen,"return reaches melee and immediately resumes solo")
+ for _,guard in ipairs(bees) do guard.pos=Vector3(5,0,0) end
+-now=6;Q:Tick();assert(Q.stage=="dash_pull" and c.blocked,"guards catching up start another separation cycle")
++now=6;Q:Tick();assert(Q.stage=="strike" and not c.blocked and c.target==queen,"normal guards catching up never restart pull or become targets")
+ -- Build transition alone is enough, no fixed timer or command3 animation is required.
+ queen.anim="command1";for _,guard in ipairs(bees) do guard:FocusTarget(p);guard.pos=Vector3(14,0,0) end
+ p.pos=Vector3(12,0,0);now=7;Q:Tick();assert(Q.dash_cycle.seen_dash)
+diff --git a/tests/combat128.lua b/tests/combat128.lua
+new file mode 100644
+index 0000000..58de6c2
+--- /dev/null
++++ b/tests/combat128.lua
+@@ -0,0 +1,111 @@
++local savedA=package.loaded["shadowself/control/actions"]
++local savedN=require("shadowself/native").context
++local now=0;GetTime=function() return now end;FRAMES=1/30
++EQUIPSLOTS={HANDS="hands",HEAD="head",BODY="body"};ACTIONS={ATTACK={},EQUIP={},PICKUP={},CHOP={},PLAY={}}
++TUNING={TOADSTOOL_SPOREBOMB_TIMER=3.5,TOADSTOOL_SPORECLOUD_RADIUS=3.5,TENTACLE_STOPATTACK_DIST=4}
++Vector3=function(x,y,z) local p={x=x,y=y,z=z};function p:DistSq(q) return (self.x-q.x)^2+(self.z-q.z)^2 end;return p end
++local guid=0
++local function entity(name,x,z)
++ guid=guid+1;local e={prefab=name,GUID=guid,pos=Vector3(x or 0,0,z or 0),frame=0,tags={},replica={},components={},entity={}}
++ function e:IsValid() return true end;function e:HasTag(t) return self.tags[t] or false end
++ function e:GetPosition() return self.pos end;function e:GetPhysicsRadius() return .5 end
++ e.AnimState={IsCurrentAnimation=function(_,n) return e.anim==n end,GetCurrentAnimationFrame=function() return e.frame end}
++ e.Transform={GetRotation=function() return 0 end};e.entity.GetParent=function() return e.parent end;return e
++end
++local p=entity("wilson",2,0);local held={};local items={};local commands={};local entities={}
++p.replica.inventory={GetEquippedItem=function(_,slot) return held[slot] end,DropItemFromInvTile=function(_,item) commands[#commands+1]={drop=item} end}
++p.replica.combat={};p.components.playercontroller={IsBusy=function() return false end}
++ThePlayer=p;TheWorld={state={}};TheSim={FindEntities=function() return entities end}
++local A={Items=function() return items end,Self=function(_,item,action) held.hands=item;commands[#commands+1]={item=item,action=action};return true end,
++ Attack=function(_,target) commands[#commands+1]={target=target,action=ACTIONS.ATTACK};return true end,
++ Scene=function(_,target,action) commands[#commands+1]={target=target,action=action};return true end}
++package.loaded["shadowself/control/actions"]=A
++require("shadowself/native").context={ENT_util={GetAnimation=function(_,e) return e.anim end}}
++local pauses=0;local stop=0
++local c={player=p,enemies={},observed={},hazards={},snapshot={},gear={},h={IsHitingFrame=function() return p.frame>=8 end},
++ bridge={PauseAttack=function() pauses=pauses+1 end,allowed=function() return true end},
++ actions={SafePoint=function() return true end,Stop=function() stop=stop+1 end},
++ travel={BeginDodge=function() end,EndDodge=function() end},Move=function(self,q,label) self.moved=q;self.status=label end}
++c.mechanisms={Equip=function(_,item) held.hands=item;return true end}
++package.loaded["shadowself/control/bosses"]=nil
++local Boss=require("shadowself/control/bosses");local b=Boss(c);c.bosses=b
++c.Latency=function() return .1 end;c.Speed=function() return 6 end
++
++
++
++local Co=require("shadowself/control/coordinator");local savedCo=package.loaded["shadowself/control/coordinator"]
++local oldStart,oldSleep,oldKill,oldPaused=StartThread,Sleep,KillThreadsWithID,IsSimPaused
++local queen=entity("beequeen");queen.tags.epic=true;queen.tags.hostile=true
++queen.replica.health={GetPercent=function() return .45 end};queen.replica.combat={GetTarget=function() return p end}
++local guard=entity("beeguard",6,0);guard.tags.hostile=true;guard.build="bee_guard_puffy_build"
++guard.AnimState.GetBuild=function() return guard.build end;guard.components.locomotor={walkspeed=8}
++guard.replica.combat={GetTarget=function() return p end}
++entities={queen,guard}
++TheSim.FindEntities=function(_,x,y,z,radius)
++ local out={};for _,e in ipairs(entities) do if e.pos:DistSq(Vector3(x,0,z))<=radius^2 then out[#out+1]=e end end;return out
++end
++local tuning={};local h={};local hits,moves=0,0
++h.GetAttackTargets=function(self,range)
++ self.selected_ents={};for _,e in ipairs(TheSim:FindEntities(p.pos.x,0,p.pos.z,range)) do self.selected_ents[e]=true end
++end
++h.GetClosestTarget=function(self) for e in pairs(self.selected_ents) do return e end end
++h.PreTheLoop=function() end;h.IsAttackPre=function() return false end;h.DoDodge=function() end
++h.CancelDodgingAtk=function() end
++for _,name in ipairs({"OnKeyFrame","OnNormalFrame","CloseAndAttack","ShouldAtkWhenDodging"}) do h[name]=function() hits=hits+1;return true end end
++h.StartHitAndRun=function() tuning.Cheatthread={id=81,SetList=function() end} end
++h.StopHitAndRun=function() tuning.Cheatthread=nil end
++local n={HitAndRun=h,TUNING=tuning,MOD_util={},ENT_util=require("shadowself/native").context.ENT_util,POS_util={GoToPoint=function(_,x,z) moves=moves+1;c.moved=Vector3(x,0,z) end},KEY_util={MoveKeyDown=function() return false end}}
++require("shadowself/native").context=n
++p.replica.combat.IsAlly=function() return false end
++p.components.playercontroller.DoAction=function() end;p.components.playercontroller.IsHopping=function() return false end
++c.owner={perception={}};c.h=h;c.gear={AttackRange=function() return 2 end,Weapon=function() return nil end,Swap=function() return true end}
++c.bosses=nil;c.encounters=nil;c.supplies=nil;c.mechanisms={Tick=function() return false end,Dodge=function(_,e,base) return base end}
++c.profiles={};c.Profile=Co.Profile;c.Scan=Co.Scan;c.NativePulse=Co.NativePulse;c.HitRecovery=function() end;c.Stop=function() end
++c.travel={BeginDodge=function() end,EndDodge=function() end,UpdateDodge=function() end}
++c.Move=function(self,point,label) self.blocked=true;self.moved=point;self.status=label;moves=moves+1 end
++package.loaded["shadowself/control/coordinator"]=function(bridge) c.bridge=bridge;return c end
++local routines={};StartThread=function(fn) local task={id=91,SetList=function() end};routines[task]=coroutine.create(fn);return task end
++Sleep=function() coroutine.yield() end;KillThreadsWithID=function() end;IsSimPaused=function() return false end
++local Bridge=require("shadowself/control/combat");local bridge=Bridge(p);assert(bridge:Start({kind="fight",coordinated=true,target="beeguard"},function() return true end))
++package.loaded["shadowself/control/coordinator"]=savedCo
++package.loaded["shadowself/control/beequeen"]=nil
++local Q=require("shadowself/control/beequeen")(c);c.beequeen=Q;Q:Anchor(queen)
++bridge.priority_target=guard;bridge.resume_target=guard
++Q.phase=1;assert(bridge.allowed(guard),"first phase still permits clearing/freezing guards")
++Q.phase=2;assert(bridge.allowed(guard),"policy does not rewrite second phase")
++Q.phase=3;Q.late=true;assert(not bridge.allowed(guard),"third-phase guard rejected before explicit command, old priority and resume overrides")
++p.pos=Vector3(8,0,0);h:GetAttackTargets(24);assert(not h.selected_ents[guard] and h.selected_ents[queen])
++c.blocked=false;c.special_active=false;c.queen_active=true;h.ent=queen;bridge.chasing=nil
++assert(not h:CloseAndAttack(guard) and not h:ShouldAtkWhenDodging(guard) and hits==0,"awake/unfrozen captured guard cannot receive follow-up")
++h.ent=guard;h:OnKeyFrame();h:OnNormalFrame();assert(hits==0)
++h.ent=queen;h:OnKeyFrame();assert(hits==1,"queen output remains allowed")
++-- Load the actual shipped DoDodge to verify its captured-guard exit cannot bypass the policy.
++local raw=read_3014_dodge();local cut=assert(raw:find("\n\tlocal initidlelist",1,true))
++local data={point="target",dist=6,fn=function() return Vector3(12,0,0) end};local originalDodge=h.DoDodge
++p.PushEvent=function() end;h.ent=guard;h.pos=guard.pos;h.ppos=p.pos
++local env=setmetatable({GLOBAL={DEGREES=math.pi/180},HitAndRun=h,ThePlayer=p,FRAMES=1/30,
++ FunctionOrValue=function(v,...) return type(v)=="function" and v(...) or v end,distsq=function(a,b) return a:DistSq(b) end,
++ POS_util=n.POS_util,Sleep=function() h.ent=queen end},{__index=_G})
++local chunk=assert(loadstring(raw:sub(1,cut-1).."\nend"));setfenv(chunk,env);chunk()
++h:DoDodge(data);assert(hits==1,"actual native DoDodge captures guard but cannot attack it after target switches to queen")
++h.DoDodge=originalDodge
++-- Actual supervisor + actual Scan: queen outside 24 units remains the encounter's target.
++bridge.priority_target=queen;bridge.resume_target=nil;p.pos=Vector3(32,0,0);guard.pos=Vector3(30,0,0);now=10;c.next_scan=nil
++assert(coroutine.resume(routines[bridge.supervisor]));assert(Q.stage=="dash_pull" and c.queen_active and c.h.ent==queen and c.moved.x>32)
++local sawqueen=false;local sawguard=false;for _,e in ipairs(c.enemies) do if e==queen then sawqueen=true elseif e==guard then sawguard=true end end
++assert(not sawqueen and sawguard,"real scan retains guard as a threat even when it cannot be attacked, queen is outside radius")
++-- A temporarily absent scan entry does not discard the already tracked boosted guard.
++p.pos=Vector3(48,0,0);guard.pos=Vector3(46,0,0);guard.tags.hostile=nil;guard.replica.combat.GetTarget=function() return nil end
++now=10.2;c.next_scan=nil;assert(coroutine.resume(routines[bridge.supervisor]));assert(Q.stage=="dash_pull" and c.moved.x>48 and Q.roster[guard],"retain known live guards while scan eligibility changes")
++-- Boost finishes; ignore guard and immediately head toward queen, without clearing it first.
++guard.build="bee_guard_build";guard.components.locomotor.walkspeed=3;guard.pos=Vector3(50,0,0)
++now=10.4;c.next_scan=nil;assert(coroutine.resume(routines[bridge.supervisor]));assert(Q.stage=="dash_return" and c.moved.x<48 and c.h.ent==queen and hits==1)
++-- Close normal guards do not restart pull; only a new real boost does.
++p.pos=Vector3(2,0,0);guard.pos=Vector3(5,0,0);now=10.6;c.next_scan=nil;assert(coroutine.resume(routines[bridge.supervisor]));assert(Q.stage=="strike" and not c.blocked and bridge:OwnsThread())
++now=10.8;c.next_scan=nil;assert(coroutine.resume(routines[bridge.supervisor]));assert(Q.stage=="strike" and c.h.ent==queen and not bridge.allowed(guard))
++guard.build="bee_guard_puffy_build";guard.components.locomotor.walkspeed=8;now=11;c.next_scan=nil
++assert(coroutine.resume(routines[bridge.supervisor]));assert(Q.stage=="dash_pull" and c.blocked and not bridge:OwnsThread(),"new boost alone starts the next outbound leg")
++bridge:Stop();StartThread,Sleep,KillThreadsWithID,IsSimPaused=oldStart,oldSleep,oldKill,oldPaused
++package.loaded["shadowself/control/actions"]=savedA;require("shadowself/native").context=savedN
++package.loaded["shadowself/control/beequeen"]=nil
++print("PASS: third-phase guard target veto before all overrides; actual native DoDodge captured-target follow-up blocked; actual supervisor/Scan retain queen beyond24 and known guards; boost-only pull, immediate normal-form return and close normal guards ignored")
+diff --git a/tools/verify51.py b/tools/verify51.py
+index 0c0de34..32af173 100644
+--- a/tools/verify51.py
++++ b/tools/verify51.py
+@@ -14,7 +14,7 @@ print('PASS: all Lua source compiles with Lua 5.1',flush=True)
+ with zipfile.ZipFile(Path("D:/Steam/steamapps/common/Don't Starve Together/data/databundles/scripts.zip")) as archive:
+     runtime.globals().read_source=lambda path:archive.read('scripts/'+path).decode('utf8')
+     runtime.globals().read_3014_dodge=lambda:(ROOT/'scripts/shadowself/native/engine/Dodge.lua').read_text(encoding='utf8')
+-    suites=['offline','render_lifecycle','conversation','daily','speech','voice','control','actions_clock','merge','native_merge','coordinator','maxwell','personality','thought_cooking','batch_cooking','navigation','fishing_queen','battlemusic','secondary_travel','dodge_cane','combat103','native_food','grinding','chat_ui','knowledge','combat112','combat114','combat115','combat116','combat117','combat118','combat119','combat120','combat121','combat122','combat123','combat124','combat125','combat126','native_embedded']
++    suites=['offline','render_lifecycle','conversation','daily','speech','voice','control','actions_clock','merge','native_merge','coordinator','maxwell','personality','thought_cooking','batch_cooking','navigation','fishing_queen','battlemusic','secondary_travel','dodge_cane','combat103','native_food','grinding','chat_ui','knowledge','combat112','combat114','combat115','combat116','combat117','combat118','combat119','combat120','combat121','combat122','combat123','combat124','combat125','combat126','combat128','native_embedded']
+     for name in (sys.argv[2].split(',') if len(sys.argv)>2 else suites):
+         runtime.execute((ROOT/'tests'/f'{name}.lua').read_text(encoding='utf8'))
+ print('PASS: Lua 5.1 regression complete; gameplay remains untested')
