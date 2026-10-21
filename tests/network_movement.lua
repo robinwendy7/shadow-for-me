@@ -19,12 +19,18 @@ P:GoToPoint(12,24)
 assert(attempted==0 and #calls==1,"busy attack cannot swallow the move before it reaches the server")
 local msg=calls[1];assert(msg[1]==101 and msg[2]==2 and msg[3]==4 and msg[4]==false and msg[5]==true and msg[6]==platform and msg[7]==true,"correct platform-relative PredictWalking with isstart=true")
 H:StopPredictWalk();assert(calls[2][1]==101 and calls[2][9]==true and calls[3][1]==102 and not H.shadowself_predicting,"prediction is explicitly stopped before attacks/cleanup")
-busy=false;H:WalkTo(Vector3(0,0,0),Vector3(1,0,0),-.3)
-assert(attempted==1 and calls[4][1]==101 and calls[4][2]<-10 and calls[5][1]==103,"post-hit backstep uses same real RPC path")
+-- Ordinary recovery must retain the original input sequence, not emergency prediction.
+busy=false;ThePlayer.replica={inventory={GetActiveItem=function() end}}
+H.PC=pc;H.ppos=Vector3(0,0,0);H.pos=Vector3(1,0,0)
+H:WalkTo(Vector3(0,0,0),Vector3(1,0,0),-.3)
+assert(attempted==1 and #calls==3,"ordinary locomotor recovery uses original DoAction only")
+H:_PredictWalk(Vector3(-.3,0,0))
+assert(#calls==6 and calls[4][1]==101 and calls[4][2]==-.3 and calls[5][1]==103 and calls[6][1]==101,
+    "original PredictWalking / LeftClick WALKTO / PredictWalking order")
+assert(not H.shadowself_predicting,"ordinary recovery must not start emergency prediction sessions")
 H:PredictWalk(Vector3(0,0,0),Vector3(1,0,0),{GetPosition=function() return Vector3(1,0,0) end})
-assert(calls[#calls-1][5]==false,"continuing movement must not restart prediction timer every frame")
-assert(calls[#calls-1][2]<-10,"range-limit fallback must not move toward boss/mouse")
+assert(attempted==2 and #calls==6,"at reach boundary restore original local recovery instead of extra outward .15 step")
 local actual=read_source("components/playercontroller.lua")
 assert(actual:find('elseif self:IsBusy() then',1,true) and actual:find('if isstart then',1,true) and actual:find('RestartPredictMoveTimer()',1,true))
 ThePlayer,RPC,ACTIONS,BufferedAction=oldPlayer,oldRPC,oldActions,oldBuffered
-print("PASS: real native DoDodge POS entry and WalkTo share valid prediction session despite busy; platform coordinates; stopped prediction; outward backstep fallback; installed controller source guards")
+print("PASS: emergency movement remains busy-safe; ordinary recovery restores original action sequence and boundary behavior")

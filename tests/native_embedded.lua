@@ -48,6 +48,8 @@ assert(host_calls==2 and resolutions==1,"strict host RPC dispatch resolves and c
 local foe={GetPosition=function() return Vector3(2,0,0) end}
 n.HitAndRun.ent=foe;n.HitAndRun:OnNormalFrame()
 assert(host_calls==3 and controller.handler==input_handler,"actual native OnNormalFrame -> CloseAndAttack reaches enabled host attack handler")
+n.HitAndRun.PC=controller;n.HitAndRun.isserver=true
+ThePlayer.GetPosition=function() return Vector3(0,0,0) end
 n.HitAndRun:PredictWalk(Vector3(0,0,0),Vector3(1,0,0),foe)
 assert(moves==1,"host recovery uses one native WALKTO action instead of rejected PredictWalking RPC")
 local old_handler=RPC_HANDLERS[99];RPC_HANDLERS[99]=function() error("injected RPC failure") end

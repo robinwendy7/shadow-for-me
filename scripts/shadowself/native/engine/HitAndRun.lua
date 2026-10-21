@@ -148,8 +148,11 @@ function HitAndRun:GetClosestTarget()
 end
 
 do --走向和攻击函数
-    -- 完整原版预测移动会话：DoAction在busy时拒绝WALKTO，不能靠它发送躲避。
-    local function doPredictwalk(x,z)
+	local function doPredictwalk(x, z)
+		SendRPCToServer(RPC.PredictWalking, x, z)
+	end
+    -- 仅紧急躲避使用完整预测会话；普通走A使用下方3014原版入口。
+    local function emergencywalk(x,z)
         local pc=ThePlayer.components.playercontroller
         local platform,rx,rz=pc:GetPlatformRelativePosition(x,z)
         if RPC.PredictWalking then
@@ -176,13 +179,35 @@ do --走向和攻击函数
             self.shadowself_predicting=nil
         end
     end
-    function HitAndRun:DoPredictWalk(x,z) return doPredictwalk(x,z) end
-    function HitAndRun:_PredictWalk(point) return doPredictwalk(point.x,point.z) end
-    function HitAndRun:PredictWalk(ppos,mpos,target)
-        local aim=POS_util:CalculateAimPos(ppos,target and target:GetPosition() or mpos,target and math.pi or 0,.15)
-        if HitAndRun.shadowself_backstep then aim=HitAndRun.shadowself_backstep(aim,target) end
-        return doPredictwalk(aim.x,aim.z)
-    end
+    function HitAndRun:DoPredictWalk(x,z) return emergencywalk(x,z) end
+
+
+	function HitAndRun:_PredictWalk(pos)
+		local animpos = pos
+		local x, z = animpos.x, animpos.z
+		doPredictwalk(x, z)
+		SendRPCToServer(RPC.LeftClick, ACTIONS.WALKTO.code, x, z)
+		doPredictwalk(x, z)
+	end
+
+	--原地走位打断后摇
+	function HitAndRun:PredictWalk(ppos, mpos, target)
+		if HitAndRun.PC:CanLocomote() and not HitAndRun.PC.ismastersim then
+			local animpos = POS_util:CalculateAimPos(ppos, mpos, 0, 0.5)
+			local action = BufferedAction(HitAndRun.PC.inst, nil, ACTIONS.WALKTO, nil, animpos)
+			HitAndRun.PC:DoAction(action)
+		else
+			if HitAndRun.isserver then
+                local animpos=POS_util:CalculateAimPos(ThePlayer:GetPosition(),target:GetPosition(),0,.01)
+                HitAndRun.PC:DoAction(BufferedAction(HitAndRun.PC.inst,nil,ACTIONS.WALKTO,nil,animpos))
+			else
+				HitAndRun:_PredictWalk(ThePlayer:GetPosition())
+				--[[local animpos = POS_util:CalculateAimPos(ThePlayer:GetPosition(), target:GetPosition(), 0,
+				 0.00001)
+				SendRPCToServer(, animpos.x, animpos.z)]]
+			end
+		end
+	end
 
 	--攻击
 	function HitAndRun:CloseAndAttack(target, force_force)
@@ -239,9 +264,17 @@ do --走向和攻击函数
 			end
 		end
 		local x, z = fx, fz
-        local point=Vector3(x,0,z)
-        if HitAndRun.shadowself_backstep then point=HitAndRun.shadowself_backstep(point,rangecheck_ent or HitAndRun.ent) end
-        return doPredictwalk(point.x,point.z)
+		local ActiveItem = ThePlayer.replica.inventory:GetActiveItem()
+		local playercontroller = ThePlayer.components.playercontroller
+		if playercontroller:CanLocomote() then
+			local action = BufferedAction(playercontroller.inst, nil, ACTIONS.WALKTO, nil,
+				Vector3(x, 0, z))
+			playercontroller:DoAction(action)
+		else
+			local platform, pos_x, pos_z = playercontroller:GetPlatformRelativePosition(x, z)
+			SendRPCToServer(RPC.LeftClick, ACTIONS.WALKTO.code, pos_x, pos_z, ActiveItem, nil, nil,
+				nil, nil, platform, platform ~= nil)
+		end
 	end
 
 	function HitAndRun:PredictWalkTo(startpos, stoppos, walkdistance, checkrange, rangecheck_ent, trydodging)
@@ -261,9 +294,7 @@ do --走向和攻击函数
 			end
 		end
 		local x, z = fx, fz
-		local point=Vector3(x,0,z)
-        if HitAndRun.shadowself_backstep then point=HitAndRun.shadowself_backstep(point,rangecheck_ent or HitAndRun.ent) end
-        HitAndRun:_PredictWalk(point)
+		HitAndRun:_PredictWalk(Vector3(x, 0, z))
 	end
 end
 do --功能性函数

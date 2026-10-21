@@ -283,12 +283,6 @@ function Bridge:Coordinate(plan)
         local current=function(object,...) return fn(old,object,...) end
         self.wrappers[name]={old=old,current=current};h[name]=current
     end
-    self.saved.shadowself_backstep={value=self.h.shadowself_backstep}
-    self.h.shadowself_backstep=function(point,target)
-        local c=self.coordinator
-        if target and (c.bosses and c.bosses:HoldPosition(target) or c.mechanisms and c.mechanisms.tanking_chomp==target) then return self.player:GetPosition() end
-        return target and c.secondary:Point(point,target) or point
-    end
     wrap("PreTheLoop",function(old,object,...)
         old(object,...);self.coordinator:NativePulse()
         if not self.coordinator.special_active then self.coordinator.secondary:Pulse() end

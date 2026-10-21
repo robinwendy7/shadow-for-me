@@ -1,0 +1,392 @@
+diff --git a/README.md b/README.md
+index a31c401..6ef4d7c 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # 影子 · Shadow Self / Cry for me
+ 
+-《饥荒联机版》纯客户端 Mod，游戏内名称为“如影随形(测试版)”。当前版本 **0.12.22**，作者：**舒晴伊子**。
++《饥荒联机版》纯客户端 Mod，游戏内名称为“如影随形(测试版)”。当前版本 **0.12.23**，作者：**舒晴伊子**。
+ 
+ ## 主要功能
+ 
+@@ -8,7 +8,7 @@
+ - **离线对话**：结合游戏状态、近期事件、对话历史和伪记忆选择回应；内置16种MBTI对话人格，右键影子可选择。文字与对话逻辑在本地运行，不调用外部AI服务。
+ - **头顶说话**：影子及接管后的角色头顶显示回应；字体颜色可选红橙黄绿青蓝紫，默认红色；人物说话声音默认开启，可在Mod设置关闭。
+ - **授权接管**：通过对话提出任务，影子申请接管，经同意并完成覆盖演出后执行；支持战斗接管按钮，人物脚下显示同意或停止按钮。
+-- **自动战斗与走位**：内置走A及自动走位，支持武器/护甲选择、手杖赶路、群怪攻击检查，以及蜂后等Boss的专门处理；按Boss实际出招和虚弱状态区分走位与持续输出，侧方冲刺可抢占当前攻击或躲避。战斗接管保持到玩家主动停止。
++- **自动战斗与走位**：内置走A及自动走位，攻击后退步恢复3014原版调用与最大攻击距离限制；支持武器/护甲选择、手杖赶路、群怪攻击检查，以及蜂后等Boss的专门处理；按Boss实际出招和虚弱状态区分走位与持续输出，侧方冲刺可抢占当前攻击或躲避。战斗接管保持到玩家主动停止。
+ - **料理与调味**：连续使用多个锅做饭，遍历附近可用容器获取食材，收获并存放成品；支持沃利专属料理、研磨调味粉和调味流程。
+ - **钓鱼与日常任务**：支持池塘钓鱼、海钓，以及砍树、挖矿、采集、拾取、制作和移动等任务。
+ - **战斗音乐**：可选择接管战斗时播放内置BGM，音量跟随游戏音乐设置。
+@@ -42,4 +42,4 @@
+ 
+ ## 当前验证状态
+ 
+-52组Lua 5.1离线回归通过。离线检查不等同于实际联机战斗验证，Boss走位和音画效果仍需游戏内测试。
++53组Lua 5.1离线回归通过。离线检查不等同于实际联机战斗验证，Boss走位和音画效果仍需游戏内测试。
+diff --git a/modinfo.lua b/modinfo.lua
+index 29e5478..471a66f 100644
+--- a/modinfo.lua
++++ b/modinfo.lua
+@@ -1,15 +1,15 @@
+ name = "如影随形(测试版)"
+ description = "安静地跟着你的另一个自己。纯客户端本地影子与离线对话。\n仅聊天输入栏：右键拖动，回车发送。护甲槽上方可战斗接管。"
+ author = "舒晴伊子"
+-version = "0.12.22"
++version = "0.12.23"
+ api_version = 10
+ dst_compatible = true
+ client_only_mod = true
+ all_clients_require_mod = false
+ server_only_mod = false
+-configuration_options = {
+-    {name="speech_color",label="影子说话字体颜色",options={{description="红",data="red"},{description="橙",data="orange"},{description="黄",data="yellow"},{description="绿",data="green"},{description="青",data="cyan"},{description="蓝",data="blue"},{description="紫",data="purple"}},default="red"},
+-    {name="speech_voice",label="影子说话是否有声音",options={{description="是",data=true},{description="否",data=false}},default=true},
++configuration_options = {
++    {name="speech_color",label="影子说话字体颜色",options={{description="红",data="red"},{description="橙",data="orange"},{description="黄",data="yellow"},{description="绿",data="green"},{description="青",data="cyan"},{description="蓝",data="blue"},{description="紫",data="purple"}},default="red"},
++    {name="speech_voice",label="影子说话是否有声音",options={{description="是",data=true},{description="否",data=false}},default=true},
+     {name="battle_music",label="接管战斗后燃起来",hover="接管战斗时播放所提供的雨爱BGM，停止战斗时关闭。",options={{description="是",data=true},{description="否",data=false}},default=true},
+     {name="leash", label="自主活动范围（码）", options={{description="5",data=5},{description="8",data=8},{description="10",data=10},{description="12",data=12},{description="15",data=15}}, default=15},
+     {name="frequency", label="主动对话间隔", options={{description="安静（45秒）",data=45},{description="默认（25秒）",data=25},{description="健谈（12秒）",data=12}}, default=25},
+diff --git a/scripts/shadowself/control/combat.lua b/scripts/shadowself/control/combat.lua
+index fec8d10..c9e9ded 100644
+--- a/scripts/shadowself/control/combat.lua
++++ b/scripts/shadowself/control/combat.lua
+@@ -283,12 +283,6 @@ function Bridge:Coordinate(plan)
+         local current=function(object,...) return fn(old,object,...) end
+         self.wrappers[name]={old=old,current=current};h[name]=current
+     end
+-    self.saved.shadowself_backstep={value=self.h.shadowself_backstep}
+-    self.h.shadowself_backstep=function(point,target)
+-        local c=self.coordinator
+-        if target and (c.bosses and c.bosses:HoldPosition(target) or c.mechanisms and c.mechanisms.tanking_chomp==target) then return self.player:GetPosition() end
+-        return target and c.secondary:Point(point,target) or point
+-    end
+     wrap("PreTheLoop",function(old,object,...)
+         old(object,...);self.coordinator:NativePulse()
+         if not self.coordinator.special_active then self.coordinator.secondary:Pulse() end
+diff --git a/scripts/shadowself/control/queendebug.lua b/scripts/shadowself/control/queendebug.lua
+index d96972d..3f7edcc 100644
+--- a/scripts/shadowself/control/queendebug.lua
++++ b/scripts/shadowself/control/queendebug.lua
+@@ -1,5 +1,5 @@
+ -- 蜂后调试已移除。保留空接口供历史调用点使用，不采样、不计数、不打印。
+-local M={VERSION="0.12.22",enabled=false}
++local M={VERSION="0.12.23",enabled=false}
+ local function noop() end
+ for _,name in ipairs({"Configure","Start","Event","Change","Throttle","Block","Performed","Equip","Move","Hit","Sample"}) do M[name]=noop end
+ function M.End(c) if c then c._queen_debug=nil end end
+diff --git a/scripts/shadowself/native/engine/HitAndRun.lua b/scripts/shadowself/native/engine/HitAndRun.lua
+index d2239d2..6f4111f 100644
+--- a/scripts/shadowself/native/engine/HitAndRun.lua
++++ b/scripts/shadowself/native/engine/HitAndRun.lua
+@@ -148,8 +148,11 @@ function HitAndRun:GetClosestTarget()
+ end
+ 
+ do --走向和攻击函数
+-    -- 完整原版预测移动会话：DoAction在busy时拒绝WALKTO，不能靠它发送躲避。
+-    local function doPredictwalk(x,z)
++	local function doPredictwalk(x, z)
++		SendRPCToServer(RPC.PredictWalking, x, z)
++	end
++    -- 仅紧急躲避使用完整预测会话；普通走A使用下方3014原版入口。
++    local function emergencywalk(x,z)
+         local pc=ThePlayer.components.playercontroller
+         local platform,rx,rz=pc:GetPlatformRelativePosition(x,z)
+         if RPC.PredictWalking then
+@@ -176,13 +179,35 @@ do --走向和攻击函数
+             self.shadowself_predicting=nil
+         end
+     end
+-    function HitAndRun:DoPredictWalk(x,z) return doPredictwalk(x,z) end
+-    function HitAndRun:_PredictWalk(point) return doPredictwalk(point.x,point.z) end
+-    function HitAndRun:PredictWalk(ppos,mpos,target)
+-        local aim=POS_util:CalculateAimPos(ppos,target and target:GetPosition() or mpos,target and math.pi or 0,.15)
+-        if HitAndRun.shadowself_backstep then aim=HitAndRun.shadowself_backstep(aim,target) end
+-        return doPredictwalk(aim.x,aim.z)
+-    end
++    function HitAndRun:DoPredictWalk(x,z) return emergencywalk(x,z) end
++
++
++	function HitAndRun:_PredictWalk(pos)
++		local animpos = pos
++		local x, z = animpos.x, animpos.z
++		doPredictwalk(x, z)
++		SendRPCToServer(RPC.LeftClick, ACTIONS.WALKTO.code, x, z)
++		doPredictwalk(x, z)
++	end
++
++	--原地走位打断后摇
++	function HitAndRun:PredictWalk(ppos, mpos, target)
++		if HitAndRun.PC:CanLocomote() and not HitAndRun.PC.ismastersim then
++			local animpos = POS_util:CalculateAimPos(ppos, mpos, 0, 0.5)
++			local action = BufferedAction(HitAndRun.PC.inst, nil, ACTIONS.WALKTO, nil, animpos)
++			HitAndRun.PC:DoAction(action)
++		else
++			if HitAndRun.isserver then
++                local animpos=POS_util:CalculateAimPos(ThePlayer:GetPosition(),target:GetPosition(),0,.01)
++                HitAndRun.PC:DoAction(BufferedAction(HitAndRun.PC.inst,nil,ACTIONS.WALKTO,nil,animpos))
++			else
++				HitAndRun:_PredictWalk(ThePlayer:GetPosition())
++				--[[local animpos = POS_util:CalculateAimPos(ThePlayer:GetPosition(), target:GetPosition(), 0,
++				 0.00001)
++				SendRPCToServer(, animpos.x, animpos.z)]]
++			end
++		end
++	end
+ 
+ 	--攻击
+ 	function HitAndRun:CloseAndAttack(target, force_force)
+@@ -239,9 +264,17 @@ do --走向和攻击函数
+ 			end
+ 		end
+ 		local x, z = fx, fz
+-        local point=Vector3(x,0,z)
+-        if HitAndRun.shadowself_backstep then point=HitAndRun.shadowself_backstep(point,rangecheck_ent or HitAndRun.ent) end
+-        return doPredictwalk(point.x,point.z)
++		local ActiveItem = ThePlayer.replica.inventory:GetActiveItem()
++		local playercontroller = ThePlayer.components.playercontroller
++		if playercontroller:CanLocomote() then
++			local action = BufferedAction(playercontroller.inst, nil, ACTIONS.WALKTO, nil,
++				Vector3(x, 0, z))
++			playercontroller:DoAction(action)
++		else
++			local platform, pos_x, pos_z = playercontroller:GetPlatformRelativePosition(x, z)
++			SendRPCToServer(RPC.LeftClick, ACTIONS.WALKTO.code, pos_x, pos_z, ActiveItem, nil, nil,
++				nil, nil, platform, platform ~= nil)
++		end
+ 	end
+ 
+ 	function HitAndRun:PredictWalkTo(startpos, stoppos, walkdistance, checkrange, rangecheck_ent, trydodging)
+@@ -261,9 +294,7 @@ do --走向和攻击函数
+ 			end
+ 		end
+ 		local x, z = fx, fz
+-		local point=Vector3(x,0,z)
+-        if HitAndRun.shadowself_backstep then point=HitAndRun.shadowself_backstep(point,rangecheck_ent or HitAndRun.ent) end
+-        HitAndRun:_PredictWalk(point)
++		HitAndRun:_PredictWalk(Vector3(x, 0, z))
+ 	end
+ end
+ do --功能性函数
+diff --git a/tests/native_embedded.lua b/tests/native_embedded.lua
+index 95b7a4c..d9905fa 100644
+--- a/tests/native_embedded.lua
++++ b/tests/native_embedded.lua
+@@ -48,6 +48,8 @@ assert(host_calls==2 and resolutions==1,"strict host RPC dispatch resolves and c
+ local foe={GetPosition=function() return Vector3(2,0,0) end}
+ n.HitAndRun.ent=foe;n.HitAndRun:OnNormalFrame()
+ assert(host_calls==3 and controller.handler==input_handler,"actual native OnNormalFrame -> CloseAndAttack reaches enabled host attack handler")
++n.HitAndRun.PC=controller;n.HitAndRun.isserver=true
++ThePlayer.GetPosition=function() return Vector3(0,0,0) end
+ n.HitAndRun:PredictWalk(Vector3(0,0,0),Vector3(1,0,0),foe)
+ assert(moves==1,"host recovery uses one native WALKTO action instead of rejected PredictWalking RPC")
+ local old_handler=RPC_HANDLERS[99];RPC_HANDLERS[99]=function() error("injected RPC failure") end
+diff --git a/tests/network_movement.lua b/tests/network_movement.lua
+index 5644f75..39ad50e 100644
+--- a/tests/network_movement.lua
++++ b/tests/network_movement.lua
+@@ -19,12 +19,18 @@ P:GoToPoint(12,24)
+ assert(attempted==0 and #calls==1,"busy attack cannot swallow the move before it reaches the server")
+ local msg=calls[1];assert(msg[1]==101 and msg[2]==2 and msg[3]==4 and msg[4]==false and msg[5]==true and msg[6]==platform and msg[7]==true,"correct platform-relative PredictWalking with isstart=true")
+ H:StopPredictWalk();assert(calls[2][1]==101 and calls[2][9]==true and calls[3][1]==102 and not H.shadowself_predicting,"prediction is explicitly stopped before attacks/cleanup")
+-busy=false;H:WalkTo(Vector3(0,0,0),Vector3(1,0,0),-.3)
+-assert(attempted==1 and calls[4][1]==101 and calls[4][2]<-10 and calls[5][1]==103,"post-hit backstep uses same real RPC path")
++-- Ordinary recovery must retain the original input sequence, not emergency prediction.
++busy=false;ThePlayer.replica={inventory={GetActiveItem=function() end}}
++H.PC=pc;H.ppos=Vector3(0,0,0);H.pos=Vector3(1,0,0)
++H:WalkTo(Vector3(0,0,0),Vector3(1,0,0),-.3)
++assert(attempted==1 and #calls==3,"ordinary locomotor recovery uses original DoAction only")
++H:_PredictWalk(Vector3(-.3,0,0))
++assert(#calls==6 and calls[4][1]==101 and calls[4][2]==-.3 and calls[5][1]==103 and calls[6][1]==101,
++    "original PredictWalking / LeftClick WALKTO / PredictWalking order")
++assert(not H.shadowself_predicting,"ordinary recovery must not start emergency prediction sessions")
+ H:PredictWalk(Vector3(0,0,0),Vector3(1,0,0),{GetPosition=function() return Vector3(1,0,0) end})
+-assert(calls[#calls-1][5]==false,"continuing movement must not restart prediction timer every frame")
+-assert(calls[#calls-1][2]<-10,"range-limit fallback must not move toward boss/mouse")
++assert(attempted==2 and #calls==6,"at reach boundary restore original local recovery instead of extra outward .15 step")
+ local actual=read_source("components/playercontroller.lua")
+ assert(actual:find('elseif self:IsBusy() then',1,true) and actual:find('if isstart then',1,true) and actual:find('RestartPredictMoveTimer()',1,true))
+ ThePlayer,RPC,ACTIONS,BufferedAction=oldPlayer,oldRPC,oldActions,oldBuffered
+-print("PASS: real native DoDodge POS entry and WalkTo share valid prediction session despite busy; platform coordinates; stopped prediction; outward backstep fallback; installed controller source guards")
++print("PASS: emergency movement remains busy-safe; ordinary recovery restores original action sequence and boundary behavior")
+diff --git a/tests/walka_original.lua b/tests/walka_original.lua
+new file mode 100644
+index 0000000..cceb7cb
+--- /dev/null
++++ b/tests/walka_original.lua
+@@ -0,0 +1,160 @@
++-- Execute the original and restored methods with identical input; no engine timing guesses.
++local original=[====[do --走向和攻击函数
++	local function doPredictwalk(x, z)
++		SendRPCToServer(RPC.PredictWalking, x, z)
++	end
++	function HitAndRun:DoPredictWalk(x, z)
++		doPredictwalk(x, z)
++	end
++
++	function HitAndRun:_PredictWalk(pos)
++		local animpos = pos
++		local x, z = animpos.x, animpos.z
++		doPredictwalk(x, z)
++		SendRPCToServer(RPC.LeftClick, ACTIONS.WALKTO.code, x, z)
++		doPredictwalk(x, z)
++	end
++
++	--原地走位打断后摇
++	function HitAndRun:PredictWalk(ppos, mpos, target)
++		if HitAndRun.PC:CanLocomote() and not HitAndRun.PC.ismastersim then
++			local animpos = POS_util:CalculateAimPos(ppos, mpos, 0, 0.5)
++			local action = BufferedAction(HitAndRun.PC.inst, nil, ACTIONS.WALKTO, nil, animpos)
++			HitAndRun.PC:DoAction(action)
++		else
++			if HitAndRun.isserver then
++				local animpos = POS_util:CalculateAimPos(ThePlayer:GetPosition(), target:GetPosition(), 0,
++					0.01)
++				doPredictwalk(animpos.x, animpos.z)
++				SendRPCToServer(RPC.LeftClick, ACTIONS.WALKTO.code, animpos.x, animpos.z, ThePlayer)
++			else
++				HitAndRun:_PredictWalk(ThePlayer:GetPosition())
++				--[[local animpos = POS_util:CalculateAimPos(ThePlayer:GetPosition(), target:GetPosition(), 0,
++				 0.00001)
++				SendRPCToServer(, animpos.x, animpos.z)]]
++			end
++		end
++	end
++
++	--攻击
++	function HitAndRun:CloseAndAttack(target, force_force)
++		if not target or not ThePlayer then return end
++		local pos = target:GetPosition()
++		local noforce = true
++		if force_force then
++			noforce = false
++		end
++		if ThePlayer:HasTag("weregoose") then
++			SendRPCToServer(RPC.ControllerAttackButton, target, true, noforce)
++		elseif ThePlayer.components.playercontroller:CanLocomote() and not ThePlayer.components.playercontroller.ismastersim then
++			local act = BufferedAction(ThePlayer.components.playercontroller.inst, target, ACTIONS.ATTACK)
++			if act ~= nil then
++				act.preview_cb = function()
++					SendRPCToServer(RPC.LeftClick, ACTIONS.ATTACK.code, pos.x, pos.z, target, true, 10,
++						nil, nil)
++				end
++				ThePlayer.components.playercontroller:DoAction(act)
++			end
++		else
++			local activeitem = INV_util:GetActiveItem()
++			local blowdart = HitAndRun.cannomouseatk
++			if activeitem or blowdart then
++				if blowdart or HitAndRun:DoubleSwitching() then
++					SendRPCToServer(RPC.AttackButton, target, true, false)
++				else
++					SendRPCToServer(RPC.AttackButton, target, true, noforce)
++				end
++			else
++				--SendRPCToServer(RPC.LeftClick, ACTIONS.ATTACK.code, pos.x, pos.z, target, true, 10, true)
++
++				SendRPCToServer(RPC.LeftClick, ACTIONS.ATTACK.code, pos.x, pos.z, target, nil, 10, noforce) --连打
++			end
++		end
++	end
++
++	--走向某个点
++	function HitAndRun:WalkTo(startpos, stoppos, walkdistance, checkrange, rangecheck_ent, trydodging)
++		local pmdistance = math.sqrt((startpos.x - stoppos.x) * (startpos.x - stoppos.x) +
++			(startpos.z - stoppos.z) * (startpos.z - stoppos.z))
++		local dx, dz = stoppos.x - startpos.x, stoppos.z - startpos.z
++		if dx == 0 and dz == 0 then dx, dz = 1, 1 end
++		if pmdistance == 0 then pmdistance = 0.1 end
++		local fx, fz = startpos.x + walkdistance * dx / pmdistance, startpos.z + walkdistance * dz / pmdistance
++		if checkrange then
++			if distsq(HitAndRun.pos.x, HitAndRun.pos.z, fx, fz) > checkrange * checkrange then
++				if trydodging and rangecheck_ent then
++					return HitAndRun:PredictWalk(HitAndRun.ppos, rangecheck_ent:GetPosition(), rangecheck_ent)
++				else
++					return HitAndRun:WalkTo(startpos, HitAndRun.pos or stoppos, math.abs(walkdistance))
++				end
++			end
++		end
++		local x, z = fx, fz
++		local ActiveItem = ThePlayer.replica.inventory:GetActiveItem()
++		local playercontroller = ThePlayer.components.playercontroller
++		if playercontroller:CanLocomote() then
++			local action = BufferedAction(playercontroller.inst, nil, ACTIONS.WALKTO, nil,
++				Vector3(x, 0, z))
++			playercontroller:DoAction(action)
++		else
++			local platform, pos_x, pos_z = playercontroller:GetPlatformRelativePosition(x, z)
++			SendRPCToServer(RPC.LeftClick, ACTIONS.WALKTO.code, pos_x, pos_z, ActiveItem, nil, nil,
++				nil, nil, platform, platform ~= nil)
++		end
++	end
++
++	function HitAndRun:PredictWalkTo(startpos, stoppos, walkdistance, checkrange, rangecheck_ent, trydodging)
++		local pmdistance = math.sqrt((startpos.x - stoppos.x) * (startpos.x - stoppos.x) +
++			(startpos.z - stoppos.z) * (startpos.z - stoppos.z))
++		local dx, dz = stoppos.x - startpos.x, stoppos.z - startpos.z
++		if dx == 0 and dz == 0 then dx, dz = 1, 1 end
++		if pmdistance == 0 then pmdistance = 0.1 end
++		local fx, fz = startpos.x + walkdistance * dx / pmdistance, startpos.z + walkdistance * dz / pmdistance
++		if checkrange then
++			if distsq(HitAndRun.pos.x, HitAndRun.pos.z, fx, fz) > checkrange * checkrange then
++				if trydodging and rangecheck_ent then
++					return HitAndRun:PredictWalk(HitAndRun.ppos, rangecheck_ent:GetPosition(), rangecheck_ent)
++				else
++					return HitAndRun:PredictWalkTo(startpos, HitAndRun.pos or stoppos, math.abs(walkdistance))
++				end
++			end
++		end
++		local x, z = fx, fz
++		HitAndRun:_PredictWalk(Vector3(x, 0, z))
++	end
++end]====]
++local file=assert(io.open("scripts/shadowself/native/engine/HitAndRun.lua"));local source=file:read("*a");file:close()
++local a=assert(source:find("do --走向和攻击函数",1,true));local z=assert(source:find("\ndo --功能性函数",a,true))
++local restored=source:sub(a,z-1)
++local function run(src,locomote,distance)
++ local calls={};local H={pos=Vector3(0,0,0),ppos=Vector3(distance,0,0),isserver=false}
++ local foe={GetPosition=function() return H.pos end};H.ent=foe
++ local pc={CanLocomote=function() return locomote end,ismastersim=false,
++ GetPlatformRelativePosition=function(_,x,z) return nil,x,z end,
++ DoAction=function(_,act) calls[#calls+1]={"action",act.pos.x,act.pos.z} end}
++ H.PC=pc
++ local player={components={playercontroller=pc},replica={inventory={GetActiveItem=function() end}},GetPosition=function() return H.ppos end}
++ local env=setmetatable({HitAndRun=H,ThePlayer=player,POS_util={CalculateAimPos=function(_,p,q,angle,d)
++  local dx,dz=q.x-p.x,q.z-p.z;local len=math.sqrt(dx*dx+dz*dz);if len==0 then len=1 end
++  return Vector3(p.x+d*dx/len,0,p.z+d*dz/len) end},
++  RPC={PredictWalking=1,LeftClick=2},ACTIONS={WALKTO={code=3}},
++  BufferedAction=function(_,_,_,_,pos) return {pos=pos} end,
++  distsq=function(x,z,u,v) return (x-u)^2+(z-v)^2 end,
++  SendRPCToServer=function(...) calls[#calls+1]={...} end},{__index=_G})
++ local f=assert(loadstring(src));setfenv(f,env);f()
++ H:PredictWalkTo(H.ppos,H.pos,-.3,3,foe,true)
++ H:WalkTo(H.ppos,H.pos,-.3,3,foe,true)
++ return calls
++end
++for _,locomote in ipairs({true,false}) do
++ for _,d in ipairs({1,2.6,2.71,2.99,3,3.1}) do
++  local expected,actual=run(original,locomote,d),run(restored,locomote,d)
++  assert(#expected==#actual,"original recovery call count at reach "..d)
++  for i,c in ipairs(expected) do
++   for j,v in pairs(c) do assert(actual[i][j]==v,"original recovery argument "..i..":"..j.." reach "..d) end
++  end
++ end
++end
++local c=assert(io.open("scripts/shadowself/control/combat.lua")):read("*a")
++assert(not c:find("shadowself_backstep",1,true),"normal attack retreat is no longer rewritten by the secondary navigation filter")
++print("PASS: restored movement matches actual 3014 calls at inner/max/outside reach, both remote movement modes; no secondary rewrite")
+diff --git a/tools/verify51.py b/tools/verify51.py
+index 3967f84..d01a36f 100644
+--- a/tools/verify51.py
++++ b/tools/verify51.py
+@@ -16,7 +16,7 @@ with zipfile.ZipFile(Path("D:/Steam/steamapps/common/Don't Starve Together/data/
+     runtime.globals().write_debug_fixture=lambda text:(ROOT/'reviews/queen-debug-offline-fixture.log').write_text(text,encoding='utf8')
+     runtime.globals().read_source=lambda path:archive.read('scripts/'+path).decode('utf8')
+     runtime.globals().read_3014_dodge=lambda:(ROOT/'scripts/shadowself/native/engine/Dodge.lua').read_text(encoding='utf8')
+-    suites=['offline','render_lifecycle','conversation','daily','speech','voice','control','actions_clock','merge','native_merge','coordinator','maxwell','personality','thought_cooking','batch_cooking','navigation','fishing_queen','battlemusic','secondary_travel','dodge_cane','combat103','native_food','grinding','chat_ui','knowledge','combat112','combat114','combat115','combat116','combat117','combat118','combat119','combat120','combat121','combat122','combat123','combat124','combat125','combat126','combat128','queen_debug_removed','queen_flute_recovery','queen_phase1','queen_phase3','server_combat','boss140','boss141','boss142','network_movement','network_combat','combat144','native_embedded']
++    suites=['offline','render_lifecycle','conversation','daily','speech','voice','control','actions_clock','merge','native_merge','coordinator','maxwell','personality','thought_cooking','batch_cooking','navigation','fishing_queen','battlemusic','secondary_travel','dodge_cane','combat103','native_food','grinding','chat_ui','knowledge','combat112','combat114','combat115','combat116','combat117','combat118','combat119','combat120','combat121','combat122','combat123','combat124','combat125','combat126','combat128','queen_debug_removed','queen_flute_recovery','queen_phase1','queen_phase3','server_combat','boss140','boss141','boss142','network_movement','network_combat','combat144','native_embedded','walka_original']
+     for name in (sys.argv[2].split(',') if len(sys.argv)>2 else suites):
+         runtime.execute((ROOT/'tests'/f'{name}.lua').read_text(encoding='utf8'))
+ print('PASS: Lua 5.1 regression complete; gameplay remains untested')
