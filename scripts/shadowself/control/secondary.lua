@@ -58,7 +58,13 @@ function Secondary:Pulse()
     -- consider the others only if its requested route intersects their attacks.
     if self.data[primary] or c.charge_target==primary then return end
     local other=self:Danger(primary)
-    if other then self:Select(other) end
+    if other then
+        self:Select(other)
+    elseif c.h.selected_ents and not self.player:HasTag("attack") and not c.special_active and not c.bridge.priority_target then
+        -- 每刀起手前重新选最近目标；挥刀中保留目标，避免改目标造成空刀。
+        local nearest=require("shadowself/control/targetpolicy").Nearest(c.bridge)
+        if nearest and nearest~=primary then self:Select(nearest) end
+    end
 end
 -- 侧方战车等的冲撞是整条扫掠路径，不能只看怪物当前脚下的小圆。
 function Secondary:LaneBlocked(point,primary)
@@ -126,7 +132,7 @@ function Secondary:Wrap(primary,data,checktab)
 end
 function Secondary:AfterDodge(captured)
  local c=self.c
- if c.special_active or c.queen_active or c.crabking and c.crabking:Active() or c.bridge.priority_target and c.bridge.allowed(c.bridge.priority_target) and not require("shadowself/control/targetpolicy").Rook(c.bridge.priority_target) then return captured end
+ if c.queen_active or c.crabking and c.crabking:Active() or c.bridge.priority_target and c.bridge.allowed(c.bridge.priority_target) and not require("shadowself/control/targetpolicy").Rook(c.bridge.priority_target) then return captured end
  c.h:GetAttackTargets(24)
  local nearest=require("shadowself/control/targetpolicy").Nearest(c.bridge)
  if nearest then self:Select(nearest);return nearest end

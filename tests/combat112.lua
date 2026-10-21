@@ -42,7 +42,7 @@ m:Scan();assert(#m.zones==1,"visible spike is a route obstacle before its damage
 local wall=ent("sandblock",8,0);entities={wall};m:Scan();assert(wall.colour[4]==0);m:Stop();assert(wall.colour[4]==1,"sand wall visuals restore; collision entity is not removed")
 local shark=ent("sharkboi",0,0);shark.anim="atk1";p.pos=Vector3(3,0,0)
 local dodge=m:Dodge(shark,false);assert(dodge and dodge.fn)
-local point=dodge:fn();assert(point.z~=0 and point:DistSq(shark.pos)>=2.2^2-.001 and point:DistSq(shark.pos)<=2.5^2+.001,"shark route follows circumference instead of a chord through its body")
+local point=dodge:fn();assert(point.z~=0 and point:DistSq(shark.pos)>=(shark:GetPhysicsRadius(0)+p:GetPhysicsRadius(0))^2 and point:DistSq(shark.pos)<=2.5^2+.001,"shark route keeps physical clearance while using a tighter orbit")
 shark.frame=17;assert(m:Dodge(shark,false)==false,"shark hit window ends and allows attack")
 local function item(name,slot)
  local i=ent(name);i.replica.equippable={EquipSlot=function() return slot end,IsRestricted=function() return false end};return i

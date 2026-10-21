@@ -112,7 +112,10 @@ function Bridge:PauseAttack()
     if self.thread and self.thread.co and self.thread.co==coroutine.running() then
         self.pause_requested=true;return
     end
-    local resume_point=self.pause_requested and self.coordinator and self.coordinator.blocked and self.coordinator.last_point
+    local stopping=self:OwnsThread()
+    local c=self.coordinator
+    local resume_point=(stopping or self.pause_requested) and c and c.blocked
+        and (self.pause_requested or c.last_action_kind=="move") and c.last_point
     self.pause_requested=nil
     if self:OwnsThread() then
         Debug.Event(self.coordinator,"native_pause",{target=Debug.Entity(self.h.ent)})
@@ -126,7 +129,7 @@ function Bridge:PauseAttack()
     self.thread=nil
     if self.h then self.h.shadowself_dodging=nil end
     if resume_point then
-        -- 原线程退出会StopWalking；同帧重发已交给机制的退场点，不能等100ms移动节流。
+        -- 无论监督协程还是攻击协程暂停，StopWalking后都重发本轮机制移动。
         self.native.POS_util:GoToPoint(resume_point.x,resume_point.z)
         self.coordinator.next_move=GetTime()+.1
     end
@@ -310,6 +313,10 @@ function Bridge:Coordinate(plan)
                 c.travel:UpdateDodge(c.snapshot)
             end
             local argv={...}
+            if name=="ShouldAtkWhenDodging" and not c.queen_active and not (c.crabking and c.crabking:Active()) then
+                local nearest=require("shadowself/control/targetpolicy").Nearest(self)
+                if nearest and nearest~=victim then return false end
+            end
             if name=="ShouldAtkWhenDodging" and argv[2] and argv[2].noattack then return false end
             if name=="ShouldAtkWhenDodging" and c.queen_dodging then return false end
             if name=="ShouldAtkWhenDodging" and c.charge_target and c.charge_target==object.ent then return false end

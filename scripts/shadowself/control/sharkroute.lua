@@ -56,7 +56,13 @@ function R.Dodge(c,e,base)
   data.fn=function()
    local p=c.player:GetPosition();local ep=e:GetPosition();local theta=math.atan2(p.z-ep.z,p.x-ep.x)
    local back=math.pi-e.Transform:GetRotation()*math.pi/180;local delta=(back-theta+math.pi)%(2*math.pi)-math.pi
-   local radius=math.max(2.2,math.min(2.5,math.sqrt(p:DistSq(ep))))
+   -- 扫击中心前移2码，240度弧后界在本体前方0.25码。
+   -- 绕到该界后即安全，不必绕到正背；半径按真实碰撞体贴身。
+   local rot=e.Transform:GetRotation()*math.pi/180
+   local forward=(p.x-ep.x)*math.cos(rot)-(p.z-ep.z)*math.sin(rot)
+   if forward<=.1 then return p end
+   local body=(e.GetPhysicsRadius and e:GetPhysicsRadius(0) or 1)+(c.player.GetPhysicsRadius and c.player:GetPhysicsRadius(0) or .5)
+   local radius=math.max(body+.15,math.min(body+.3,math.sqrt(p:DistSq(ep))))
    local preferred=delta<0 and -1 or 1
    for _,side in ipairs({preferred,-preferred}) do
     local step=math.min(.55,math.abs(delta));local v=Vector3(ep.x+math.cos(theta+side*step)*radius,0,ep.z+math.sin(theta+side*step)*radius)

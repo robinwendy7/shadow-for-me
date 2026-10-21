@@ -32,7 +32,8 @@ end
 function Travel:UpdateDodge(snapshot)
     if not self.dodging and not self.restore_dodge then return end
     local p=self.player;local pc=p.components and p.components.playercontroller;local now=GetTime()
-    if p:HasTag("busy") or p:HasTag("attack") or pc and pc.IsBusy and pc:IsBusy() then return end
+    -- 已确认躲避时允许切手杖中断挥刀；恢复武器仍等待攻击结束。
+    if p:HasTag("busy") or not self.dodging and p:HasTag("attack") or pc and pc.IsBusy and pc:IsBusy() then return end
     if now<(self.next_dodge_equip or 0) then return end
     self.next_dodge_equip=now+.1
     local role=self.dodging and "move" or "attack"

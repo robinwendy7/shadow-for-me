@@ -1,8 +1,7 @@
 do --关于躲避的函数
 	local DEGREES = GLOBAL.DEGREES
 	local BASE_PLAYER_SPEED = 6
-	local SPEED_CACHE_TIME = 1
-	local AIM_REACHED_DIST_SQ = 0.1 * 0.1
+		local AIM_REACHED_DIST_SQ = 0.1 * 0.1
 	local IDLE_DODGE_FALLBACK_TICKS = 90
 
 	local always_can_target_prefabs = {
@@ -244,7 +243,7 @@ do --关于躲避的函数
 	end
 
 	function HitAndRun:GetSpeed()
-		if not HitAndRun.last_get_speed_time or GetTime() - HitAndRun.last_get_speed_time > SPEED_CACHE_TIME then
+		do -- 当前装备/外部移速每次计算，不能沿用上一轮手杖速度。
 			HitAndRun.last_get_speed_time = GetTime()
 			local inst = ThePlayer
 			local mult = inst.player_classified ~= nil and inst.player_classified.externalspeedmultiplier:value() or 1
@@ -423,13 +422,7 @@ addcreature("mutatedbearger", 'butt_pre_R', nil, 0, 100,
 	addcreature("mutatedbearger", 'butt', nil, 0, 10,                       --butt 8f
 		{ point = "target", update = true, angle = 0, dist = 1 + 2 * 3 })
 
-	addcreature('dragonfly', 'atk', function(ent)
-		local distance = math.sqrt(distsq(ent:GetPosition(), ThePlayer:GetPosition()))
-		local min = ent:GetPhysicsRadius(0) + ThePlayer:GetPhysicsRadius(0)
-		if ent.AnimState:GetBuild() == "dragonfly_fire_build" then return 17 end
-		--print(distance - min < 1.4 and 17 or 0)
-		return distance - min < 1.4 and 17 or 0
-	end, 0, 15, nil, {
+	addcreature('dragonfly', 'atk', calculate, 0, 15, nil, {
 		idledodge = function(ent)
 			if ent.AnimState:GetBuild() == "dragonfly_fire_build" then
 				return 1000000
