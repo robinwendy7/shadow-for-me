@@ -1,7 +1,7 @@
 name = "如影随形(测试版)"
 description = "安静地跟着你的另一个自己。纯客户端本地影子与离线对话。\n仅聊天输入栏：右键拖动，回车发送。护甲槽上方可战斗接管。"
 author = "舒晴伊子"
-version = "0.12.23"
+version = "0.12.24"
 api_version = 10
 dst_compatible = true
 client_only_mod = true

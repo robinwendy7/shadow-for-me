@@ -366,6 +366,14 @@ do --走A部分的函数
 	--第一刀判断+步进判断
 	function HitAndRun:IsKeyFrame()
         if ThePlayer.sg and ThePlayer.sg.HasStateTag and ThePlayer.sg:HasStateTag("abouttoattack") then return false end
+        -- 连续刀的delay只控制节奏，不能替代当前这一刀的命中帧。
+        -- 客户端performaction在攻击预览开始时就触发，不能作为已命中凭据。
+        if not HitAndRun.cannomouseatk and not HitAndRun:DoubleSwitching() then
+            if not ThePlayer:HasTag("attack") then return false end
+            local compensation=MOD_util:GetMOption("hitandrun_keyframe",HitAndRun.keyframe)
+                +(HitAndRun.PC:CanLocomote() and 1 or 0)+1
+            if not HitAndRun:IsHitingFrame(compensation,HitAndRun.ent,true) then return false end
+        end
 		local allfirst = MOD_util:GetMOption("hitandrun_allfirst", HitAndRun.allfirst)
 		if HitAndRun.guid == 0 or allfirst then
 			if HitAndRun.cannomouseatk then
@@ -688,7 +696,7 @@ do --记录玩家处于攻击状态的时间
 					if not ThePlayer.shadowself_ban_performed_action then
 						local act=data and (data.action or data)
                         if act and act.action==ACTIONS.ATTACK and ThePlayer:HasTag("attack") then
-                            -- 只有攻击的performaction可确认命中，WALKTO不能把下一刀提前取消。
+                            -- 仅记录攻击事件；预测客户端此事件并不确认伤害，IsKeyFrame逐刀校验动画。
 							HitAndRun.performed_action = true
 						else
 							--print("performed_action2")
