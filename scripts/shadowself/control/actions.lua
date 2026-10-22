@@ -77,6 +77,18 @@ function M.Ground(player,point,wanted,guard)
     end
     return false
 end
+-- 船套沿用原版手柄放置请求；未收到船实体不算部署成功。
+function M.Deploy(player,item,point)
+ local pc=player.components.playercontroller
+ local ii=item.replica and item.replica.inventoryitem
+ if pc:IsBusy() or not item:IsValid() or not ii or not ii:CanDeploy(point,nil,player,0) then return false end
+ if pc.ismastersim then pc:OnRemoteControllerActionButtonDeploy(item,point,0,true)
+ else
+  local platform,x,z=pc:GetPlatformRelativePosition(point.x,point.z)
+  SendRPCToServer(RPC.ControllerActionButtonDeploy,item,x,z,0,true,platform,platform~=nil)
+ end
+ return true
+end
 function M.UseOn(player,item,target,wanted)
     local picker=player.components.playeractionpicker;local pc=player.components.playercontroller
     for _,right in ipairs({true,false}) do

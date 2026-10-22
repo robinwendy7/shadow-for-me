@@ -15,6 +15,7 @@ local Coordinator=Class(function(self,bridge,plan)
     self.bosses=require("shadowself/control/bosses")(self)
     self.encounters=require("shadowself/control/encounters")(self)
     self.supplies=require("shadowself/control/supplies")(self)
+    if plan.arena then self.healing=plan.arena_healing or require("shadowself/control/arena_healing")(self.player) end
     if self.player.prefab=="waxwell" then self.maxwell=require("shadowself/control/maxwell")(self) end
 end)
 function Coordinator:Trace(text) self.status=text end
@@ -141,6 +142,7 @@ function Coordinator:HitRecovery()
         -- Hit state clears buffered actions; cancel only stale local equip waits.
         self.gear.pending=nil;self.gear.failed={};self.gear.next_request=GetTime();self.next_move=nil
         self.h.guid=0;self.last_action_kind=nil;self.attack_until=nil
+        if self.healing then self.healing:Interrupt(self) end
     end
     self.hit_active=hit or false
 end

@@ -1,0 +1,547 @@
+diff --git a/README.md b/README.md
+index 177f28d..e8d5bf6 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # 影子 · Shadow Self / Cry for me
+ 
+-《饥荒联机版》纯客户端 Mod，游戏内名称为“如影随形(测试版)”。当前版本 **0.13.2**，作者：**舒晴伊子**。
++《饥荒联机版》纯客户端 Mod，游戏内名称为“如影随形(测试版)”。当前版本 **0.13.3**，作者：**舒晴伊子**。
+ 
+ ## 主要功能
+ 
+@@ -12,7 +12,8 @@
+ - **料理与调味**：连续使用多个锅做饭，遍历附近可用容器获取食材，收获并存放成品；支持沃利专属料理、研磨调味粉和调味流程。
+ - **单人角斗场循环（本地开发版）**：对影子说“帮我循环角斗场”，同意接管后使用ASTRA经典单人协议配置、准备、开局；读取真实波次与结算状态，关间拾取补给、保留后段工具，复用内置走位战斗。可随时用停止接管按钮退出本地任务。尚未完成15关服务器通关验证。
+   - **按本局掉落选装**：已有高伤害武器才淘汰弱武器，晨星单独保留；手杖、排箫、法杖和特殊护甲按用途保留。位面伤害/防御不被普通装备简单替代；读取已同步耐久和火腿棒新鲜度，背包满时允许置换升级物品，保留最后一份已识别食物，不丢弃未知玩家物品。第8关后清理船套和桨。
+-  - **安全空档回血**：战斗血量不高于75%且缺血至少8点时，按缺失血量、实际回血、变质和调味选择料理；不高于40%时允许短暂拉开距离寻找进食位置，最长尝试3秒后重新交回正常战斗。评估肉食/快速进食时间、延迟、全部附近怪物、侧方冲撞与地面危险；Boss机制和走位优先，当前挥刀保留至完成，不为吃东西制造空刀。身上无可用料理时，仅在安全短路径内捡取3码内回血料理，确认收到后再吃。库存消耗或血量同步确认后才推进，不重复发送；关间也会补血，小幅掉血时保留大回血料理。此功能只在角斗场任务中开启。
++  - **安全空档回血**：战斗血量不高于75%且缺血至少8点时，按缺失血量、实际回血、变质和调味选择料理；不高于40%时允许短暂拉开距离寻找进食位置，最长尝试3秒、单轮不离起点8码。安全预测同时计入跑到目的地、肉食/快速进食时间和延迟；考虑全部附近怪物，包括可能在进食中解冻/醒来的近身单位。Boss机制和走位优先，当前挥刀保留至完成，不为吃东西制造空刀。身上无可用料理时，仅在安全短路径内捡取3码内回血料理，确认收到后再吃。受击、危险抢占或未开始进食时立即释放操作，迟到确认继续后台观察；回血不读写原走位的dodging/restore_dodge，等待自己的手杖确认期间不让普通攻击反向换武器。库存消耗，或观察到进食动画且经过进食时间并同步回血，才判定完成；其他来源回血不会独自充当进食确认。关间也会补血，小幅掉血时保留大回血料理。此功能只在角斗场任务中开启。
++  - **关间与扫描**：休整和停止战斗前刷新24码近处怪物，新刷怪立即接回战斗；60码补给查询每0.2秒一次，每件物品每轮只评一次优先级，失效实体逐帧剔除，换关立即刷新。近处走位和战斗检查沿用原频率。
+   - **帝王蟹阶段流程**：入关拾取船套，提交原版放船请求，收到真实船实体后上船，确认手持船桨后划向中央；等待本体出现再战斗，冰陆接回已有小蟹催眠和破冰逻辑，按首次破墙及本服宝石配置预留撤离时间，退到外圈等待转关。当前服务器源码对普通参与者禁止DEPLOY；需要服务器正常允许船套放置才能走完整流程，客户端不会绕过权限或伪造船。
+   - **巨大蠕虫**：优先抢救地上的升级防具，利用剩余物品诱导吞食，按头部真实咀嚼动画攻击可传递伤害的土堆，地裂预警优先撤离；固定一轮诱饵落点，避免反复折返，无有效诱饵时采用普通攻击窗口。
+ - **钓鱼与日常任务**：支持池塘钓鱼、海钓，以及砍树、挖矿、采集、拾取、制作和移动等任务。
+@@ -47,6 +48,6 @@
+ 
+ ## 当前验证状态
+ 
+-59组Lua 5.1离线回归通过，包含真实ASTRA请求编码、15关数据一致性、循环生命周期、动态装备取舍、原版放船请求编码、船桨确认、冰陆撤离、蠕虫窗口，以及原版料理数据和战斗回血流程检查。离线检查不等同于实际联机战斗验证，角斗场尚未完成服务器通关测试。
++60组Lua 5.1离线回归通过，包含真实ASTRA请求编码、15关数据一致性、循环生命周期、动态装备取舍、原版放船请求编码、船桨确认、冰陆撤离、蠕虫窗口，以及原版料理数据和战斗回血流程检查。新增跨帧重放覆盖真实换装状态机的迟到确认、受击后交还操作、玩家与怪物同时移动、关间两次查询之间刷怪和缓存失效；这些仍是离线模拟，不是实际服务器战斗。角斗场尚未完成服务器通关测试。
+ 
+ 角斗场兼容来源：3816458126 的 ASTRA 协议和15关数据；2067228865 交易系统不作为本地领取补给或伪造开局的入口。本轮开发仅本地保存，不上传GitHub。
+diff --git a/modinfo.lua b/modinfo.lua
+index 5ad2bab..5938df4 100644
+--- a/modinfo.lua
++++ b/modinfo.lua
+@@ -1,15 +1,15 @@
+ name = "如影随形(测试版)"
+ description = "安静地跟着你的另一个自己。纯客户端本地影子与离线对话。\n仅聊天输入栏：右键拖动，回车发送。护甲槽上方可战斗接管。"
+ author = "舒晴伊子"
+-version = "0.13.2"
++version = "0.13.3"
+ api_version = 10
+ dst_compatible = true
+ client_only_mod = true
+ all_clients_require_mod = false
+ server_only_mod = false
+-configuration_options = {
+-    {name="speech_color",label="影子说话字体颜色",options={{description="红",data="red"},{description="橙",data="orange"},{description="黄",data="yellow"},{description="绿",data="green"},{description="青",data="cyan"},{description="蓝",data="blue"},{description="紫",data="purple"}},default="red"},
+-    {name="speech_voice",label="影子说话是否有声音",options={{description="是",data=true},{description="否",data=false}},default=true},
++configuration_options = {
++    {name="speech_color",label="影子说话字体颜色",options={{description="红",data="red"},{description="橙",data="orange"},{description="黄",data="yellow"},{description="绿",data="green"},{description="青",data="cyan"},{description="蓝",data="blue"},{description="紫",data="purple"}},default="red"},
++    {name="speech_voice",label="影子说话是否有声音",options={{description="是",data=true},{description="否",data=false}},default=true},
+     {name="battle_music",label="接管战斗后燃起来",hover="接管战斗时播放所提供的雨爱BGM，停止战斗时关闭。",options={{description="是",data=true},{description="否",data=false}},default=true},
+     {name="leash", label="自主活动范围（码）", options={{description="5",data=5},{description="8",data=8},{description="10",data=10},{description="12",data=12},{description="15",data=15}}, default=15},
+     {name="frequency", label="主动对话间隔", options={{description="安静（45秒）",data=45},{description="默认（25秒）",data=25},{description="健谈（12秒）",data=12}}, default=25},
+diff --git a/scripts/shadowself/control/arena.lua b/scripts/shadowself/control/arena.lua
+index a536346..80105eb 100644
+--- a/scripts/shadowself/control/arena.lua
++++ b/scripts/shadowself/control/arena.lua
+@@ -16,7 +16,12 @@ function Arena:OwnsCombat() return self.bridge:Running() end
+ function Arena:StopCombat() if self.bridge:Running() then self.bridge:Stop() end end
+ function Arena:Entities()
+  local p=self.player:GetPosition();local enemies,items={},{}
+- self.entities=TheSim:FindEntities(p.x,0,p.z,60,nil,{"INLIMBO","FX","DECOR","playerghost"})
++ if not self.raw_entities or GetTime()>=(self.next_entities or 0) then
++  self.raw_entities=TheSim:FindEntities(p.x,0,p.z,60,nil,{"INLIMBO","FX","DECOR","playerghost"})
++  self.next_entities=GetTime()+.2
++ end
++ self.entities={}
++ for _,e in ipairs(self.raw_entities) do if e:IsValid() then self.entities[#self.entities+1]=e end end
+  if self.wave==11 then
+   for _,e in ipairs(TheSim:FindEntities(p.x,0,p.z,12,{"FX"},{"INLIMBO"})) do
+    if e.prefab=="worm_boss_dirt_ground_fx" then self.entities[#self.entities+1]=e end
+@@ -25,14 +30,16 @@ function Arena:Entities()
+  for _,e in ipairs(self.entities) do
+   if e~=self.player and e:IsValid() and not e:HasTag("player") then
+    local health=e.replica and e.replica.health
+-   if Policy.monsters[e.prefab] and e.replica and e.replica.combat and not e:HasTag("isdead") and not (health and health:IsDead()) then enemies[#enemies+1]=e
++   if Policy.monsters[e.prefab] and e.replica and e.replica.combat and not e:HasTag("isdead") and not e:HasTag("dead") and not (health and health:IsDead()) then enemies[#enemies+1]=e
+    elseif Policy.known[e.prefab] and e.replica and e.replica.inventoryitem and not e.replica.inventoryitem:IsHeld() then items[#items+1]=e end
+   end
+  end
++ local priorities,distances={},{}
++ for _,item in ipairs(items) do priorities[item]=Inventory.Priority(item,self.wave);distances[item]=p:DistSq(item:GetPosition()) end
+  table.sort(items,function(a,b)
+-  local reserveA=Inventory.Priority(a,self.wave);local reserveB=Inventory.Priority(b,self.wave)
++  local reserveA=priorities[a];local reserveB=priorities[b]
+   if reserveA~=reserveB then return reserveA>reserveB end
+-  return p:DistSq(a:GetPosition())<p:DistSq(b:GetPosition())
++  return distances[a]<distances[b]
+  end)
+  return enemies,items
+ end
+@@ -109,7 +116,23 @@ function Arena:Combat()
+  if self.encounters.worm_target or self.encounters.add_target then self.bridge.priority_target=self.encounters.worm_target or self.encounters.add_target end
+  return true
+ end
+-function Arena:Rest()
++function Arena:NearbyEnemies()
++ -- 大范围补给列表允许缓存，但进食前必须重新检查近处新生成的怪。
++ local near={};local p=self.player:GetPosition()
++ for _,e in ipairs(TheSim:FindEntities(p.x,0,p.z,24,nil,{"INLIMBO","FX","DECOR","isdead","playerghost"})) do
++  local h=e.replica and e.replica.health
++  if e~=self.player and e:IsValid() and Policy.monsters[e.prefab] and e.replica and e.replica.combat
++   and not e:HasTag("dead") and not e:HasTag("isdead") and not (h and h:IsDead()) then near[#near+1]=e end
++ end
++ if self.raw_entities and #near>0 then
++  local found={};for _,e in ipairs(self.raw_entities) do found[e]=true end
++  for _,e in ipairs(near) do if not found[e] then self.raw_entities[#self.raw_entities+1]=e end end
++ end
++ return near
++end
++function Arena:Rest(near)
++ near=near or self:NearbyEnemies()
++ if #near>0 then return false,near end
+  if not self.healing:Health() then return false end
+  if not self.rest_actions then
+   require("shadowself/legacy/action_library")
+@@ -136,11 +159,11 @@ function Arena:Tick()
+  if snapshot.instance and snapshot.kind=="PARTICIPANT" then
+   if not snapshot.arena or not snapshot.wave then self:StopCombat();return "running" end
+   if self.instance~=snapshot.instance or self.generation~=snapshot.generation then
+-   self:StopCombat();self.instance=snapshot.instance;self.generation=snapshot.generation;self.runs=self.runs+1;self.ignored={};self.pending_item=nil;self.encounters:Reset();self.healing:Reset()
++   self:StopCombat();self.instance=snapshot.instance;self.generation=snapshot.generation;self.runs=self.runs+1;self.ignored={};self.pending_item=nil;self.encounters:Reset();self.healing:Reset();self.raw_entities=nil
+   end
+   self.settling=nil;self.since=GetTime()
+   if self.wave~=snapshot.wave or self.route~=snapshot.route then
+-   self.wave=snapshot.wave;self.route=snapshot.route;self.pending_item=nil;self.ignored={};self.encounters:Reset()
++   self.wave=snapshot.wave;self.route=snapshot.route;self.pending_item=nil;self.ignored={};self.encounters:Reset();self.raw_entities=nil
+    local policy=Policy.waves[self.wave];self:Say("角斗场第"..self.wave.."关："..(policy and policy.note or "按当前敌人处理。"))
+   end
+   local enemies,items=self:Entities()
+@@ -155,10 +178,16 @@ function Arena:Tick()
+    return "running"
+   end
+   if #enemies==0 then
++   local near=self:NearbyEnemies()
++   if #near>0 then
++    local ok,why=self:Combat();if not ok then return "failed",why end
++    return "running"
++   end
+    -- 最后一只怪死亡时，让已开始的进食先收到确认，不能StopCombat把料理动作取消。
+-   if self.bridge:Running() and self.healing.pending then self.bridge:PauseAttack();return "running" end
++   if self.bridge:Running() and self.healing.pending and not self.healing.pending.interrupted then self.bridge:PauseAttack();return "running" end
+    self:StopCombat()
+-   if self:Rest() then return "running" end
++   local resting=self:Rest(near)
++   if resting then return "running" end
+    -- 拾取在服务器确认前仍占用本次操作，避免换装覆盖走向物品的动作。
+    if not self:Loot(items) and not self:Equip(enemies) then self:Prune() end
+    return "running"
+diff --git a/scripts/shadowself/control/arena_healing.lua b/scripts/shadowself/control/arena_healing.lua
+index 1803f62..1344b6b 100644
+--- a/scripts/shadowself/control/arena_healing.lua
++++ b/scripts/shadowself/control/arena_healing.lua
+@@ -3,7 +3,6 @@ local A=require("shadowself/control/actions")
+ local Food=require("shadowself/control/arena_food")
+ local Nav=require("shadowself/control/navigation")
+ local Incoming=require("shadowself/control/incoming")
+-local Status=require("shadowself/control/status")
+ local H=Class(function(self,player) self.player=player;self.failed={} end)
+ function H:Health()
+  local h=self.player.replica and self.player.replica.health
+@@ -55,8 +54,7 @@ function H:Safe(c,point,window)
+   for _,zone in ipairs(zones) do if point:DistSq(zone.pos)<((zone.radius or 0)+.5)^2 then return false end end
+  end
+  for _,e in ipairs(c.enemies or {}) do
+-  if e:IsValid() and not e:HasTag("isdead") and not e:HasTag("dead") and not e:HasTag("INLIMBO")
+-   and not Status.Sleeping(e) and not Status.Frozen(e) then
++  if e:IsValid() and not e:HasTag("isdead") and not e:HasTag("dead") and not e:HasTag("INLIMBO") then
+    local lane=Incoming.Lane(c,e)
+    if lane and Incoming.Risk(lane,point)>0 then return false end
+    local observed=c.observed and c.observed[e.GUID]
+@@ -70,18 +68,17 @@ function H:Safe(c,point,window)
+  end
+  return true
+ end
+-function H:Release(c,eating)
+- if self.seeking and c.travel then
+-  if eating then c.travel.dodging=nil;c.travel.restore_dodge=nil;c.travel.finish_deferred=nil
+-  else c.travel:EndDodge(c.snapshot) end
+- end
+- self.seeking=nil
++function H:Release(c,eating) self.seeking=nil end
++-- 打断只释放回血自己的操作权；迟到的网络确认仍继续观察，不再站着等。
++function H:Interrupt(c)
++ self:Release(c);self.draining_until=nil;self.seek_after=GetTime()+.5
++ if self.pending then self.pending.interrupted=true end
+ end
+ function H:Path(c,point)
+  if not Nav.Safe(c,point) then return false end
+  local p=self.player:GetPosition();local steps=math.max(2,math.ceil(math.sqrt(p:DistSq(point))/.5))
+  for _,e in ipairs(c.enemies or {}) do
+-  if e:IsValid() and not e:HasTag("isdead") and not e:HasTag("dead") and not Status.Sleeping(e) and not Status.Frozen(e) then
++  if e:IsValid() and not e:HasTag("isdead") and not e:HasTag("dead") then
+    local ep=e:GetPosition();local radius=Nav.Radius(e)+.6
+    local before=math.max(0,radius-math.sqrt(p:DistSq(ep)));local lane=Incoming.Lane(c,e)
+    for i=1,steps do
+@@ -118,39 +115,51 @@ function H:GroundFood(c)
+  end
+  self.failed[best.GUID]=GetTime()+3;return false
+ end
+-function H:Seek(c,item,window)
+- if c.intermission or not c.Move or not c.travel or GetTime()<(self.seek_after or 0) then return false end
+- if c.h and c.h.shadowself_dodging then return false end
+- if c.gear and (c.gear.action_hold or c.gear.pending) then return false end
+- local now=GetTime();local p=self.player:GetPosition()
++function H:Urgent(c)
++ if c.h and c.h.shadowself_dodging then return true end
++ local p=self.player:GetPosition()
+  for _,e in ipairs(c.enemies or {}) do
+   local lane=Incoming.Lane(c,e)
+-  if lane and Incoming.Risk(lane,p)>0 then return false end
++  if lane and Incoming.Risk(lane,p)>0 then return true end
+   local o=c.observed and c.observed[e.GUID];local d=o and o.dodge
+   if d then
+    local name=d.atkanim;if type(name)=="function" then name=name(e) end
+    local active=not name or e.AnimState and e.AnimState:IsCurrentAnimation(name)
+-   if active and (d.safe and not d.safe(p) or p:DistSq(e:GetPosition())<(Nav.Radius(e)+2)^2) then return false end
++   if active and (d.safe and not d.safe(p) or p:DistSq(e:GetPosition())<(Nav.Radius(e)+2)^2) then return true end
+   end
+  end
++ return false
++end
++function H:Seek(c,item,window)
++ if c.intermission or not c.Move or not c.travel or GetTime()<(self.seek_after or 0) then return false end
++ if c.gear and (c.gear.action_hold or c.gear.pending) then return false end
++ if self:Urgent(c) then self:Interrupt(c);return false end
++ local now=GetTime();local p=self.player:GetPosition()
+  if self.seeking and now-self.seeking.since>3 then
+   self:Release(c);self.seek_after=now+1;return false
+  end
++ local speed=math.max(3.5,c.Speed and c:Speed() or 6)
++ local anchor=self.seeking and self.seeking.anchor or p
+  local goal=self.seeking and self.seeking.point
+- if not goal or not self:Safe(c,goal,window) or not self:Path(c,goal) then
++ local function reachable(q)
++  return q:DistSq(anchor)<=8^2 and self:Safe(c,q,window+math.sqrt(p:DistSq(q))/speed) and self:Path(c,q)
++ end
++ if not goal or not reachable(goal) then
+   if now<(self.next_search or 0) then return false end
+   self.next_search=now+.2
+   local score;goal=nil
+   for _,length in ipairs({3,5,7}) do for i=0,15 do
+    local angle=i*math.pi/8;local q=Vector3(p.x+math.cos(angle)*length,0,p.z+math.sin(angle)*length)
+-   if self:Safe(c,q,window) and self:Path(c,q) and Nav.Clearance(c,q)>=5 then
++   if reachable(q) and Nav.Clearance(c,q)>=5 then
+     local s=p:DistSq(q);if not score or s<score then goal,score=q,s end
+    end
+   end end
+  end
+  if not goal then self:Release(c);self.seek_after=now+.5;return false end
+- self.seeking=self.seeking or {since=now};self.seeking.point=goal
+- c.travel:BeginDodge(c.snapshot);c.bridge:PauseAttack()
++ self.seeking=self.seeking or {since=now,anchor=Vector3(p.x,0,p.z)};self.seeking.point=goal
++ -- 手杖请求归回血当前动作持有，不修改原版travel的dodging/restore_dodge。
++ c.bridge:PauseAttack()
++ if c.gear and c.gear.Swap then c.gear:Swap("move",c.snapshot) end
+  c:Move(goal,"角斗场 · 拉开安全距离后吃回血料理")
+  return true
+ end
+@@ -158,6 +167,11 @@ function H:Tick(c)
+  local now=GetTime();local pc=self.player.components.playercontroller
+  if self.player:HasTag("playerghost") or self.player:HasTag("corpse") then self:Release(c);self.pending=nil;return false end
+  local hp=self:Health();if not hp or hp<=0 then return false end
++ local a=self.player.AnimState
++ local hit=a and (a:IsCurrentAnimation("hit") or a:IsCurrentAnimation("hit_spike")
++  or a:IsCurrentAnimation("channelcast_hit") or a:IsCurrentAnimation("channelcast_oh_hit"))
++ if self.last_health and hp<self.last_health-.1 or hit and not self.hit_active then self:Interrupt(c) end
++ self.last_health=hp;self.hit_active=hit or false
+  local pending=self.pending
+  if pending then
+   if pending.kind=="pickup" then
+@@ -167,16 +181,29 @@ function H:Tick(c)
+    if not pending.item:IsValid() or now>=pending.deadline then
+     self.failed[pending.guid]=now+5;self.pending=nil;return false
+    end
+-   return self:Safe(c,self.player:GetPosition(),math.max(.15,pending.untiltime-now))
++   if pending.interrupted then return false end
++   if not self:Safe(c,self.player:GetPosition(),math.max(.15,pending.untiltime-now)) then self:Interrupt(c);return false end
++   return true
+   end
+-  if self:Count(pending.name)<pending.count or hp>pending.health+.1 then
++  local a=self.player.AnimState
++  if a then
++   for _,name in ipairs({"eat_pre","eat","quick_eat_pre","quick_eat","quick_drink_pre","quick_drink","heavy_eat","heavy_quick_eat"}) do
++    if a:IsCurrentAnimation(name) then pending.saw_eat=true;break end
++   end
++  end
++  local healed=pending.saw_eat and not pending.interrupted and now>=pending.untiltime and hp>pending.health+.1
++  if self:Count(pending.name)<pending.count or healed then
+    self.pending=nil;self.next_try=now+.5;self:Release(c)
+    return pc:IsBusy()
+   elseif now>=pending.deadline then
+    self.failed[pending.guid]=now+8;self.pending=nil;self.next_try=now+.5;self:Release(c);return false
+   end
++  if pending.interrupted then return false end
++  if now>=pending.start_deadline and not pending.saw_eat and not pc:IsBusy() then
++   self:Interrupt(c);return false
++  end
+   -- 新的冲撞/技能照常抢占进食，等待晚到的库存确认，不重发同一请求。
+-  if not self:Safe(c,self.player:GetPosition(),math.max(.15,pending.untiltime-now)) then return false end
++  if not self:Safe(c,self.player:GetPosition(),math.max(.15,pending.untiltime-now)) then self:Interrupt(c);return false end
+   return true
+  end
+  if now<(self.next_try or 0) then return false end
+@@ -185,6 +212,12 @@ function H:Tick(c)
+  if c.gear and c.gear.action_hold then return false end
+  if c.gear and c.gear.pending then
+   if self.player.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)==c.gear.pending.item then c.gear.pending=nil
++  elseif self.seeking and c.gear.pending.role=="move" then
++   if self:Urgent(c) or not self:Safe(c,self.player:GetPosition(),.1) or now>=c.gear.pending.untiltime then
++    self:Interrupt(c);return false
++   end
++   -- 等自己的手杖确认，防止普通攻击模块在下一帧反向提交武器换装。
++   return true
+   else return false end
+  end
+  if c.h and c.h.shadowself_dodging then return false end
+@@ -206,7 +239,7 @@ function H:Tick(c)
+  local count=self:Count(item.prefab)
+  if c.intermission then A.Stop(self.player) end
+  if A.Self(self.player,item,ACTIONS.EAT) then
+-  self.pending={name=item.prefab,guid=item.GUID,count=count,health=hp,untiltime=now+window,deadline=now+math.max(3,window+1.5)}
++  self.pending={name=item.prefab,guid=item.GUID,count=count,health=hp,start_deadline=now+math.max(.35,delay*2+.1),untiltime=now+window,deadline=now+math.max(3,window+1.5)}
+   self.next_try=now+.3;c.status="角斗场 · 安全空档吃回血料理";return true
+  end
+  self.failed[item.GUID]=now+3;self.next_try=now+.3;return false
+@@ -214,5 +247,5 @@ end
+ function H:BlockAttack(name)
+  return GetTime()<(self.draining_until or 0) and (name=="CloseAndAttack" or name=="ShouldAtkWhenDodging" or not self.player:HasTag("attack"))
+ end
+-function H:Reset(c) if c then self:Release(c) end;self.pending=nil;self.seeking=nil;self.failed={};self.next_try=nil;self.seek_after=nil;self.next_search=nil;self.draining_until=nil;self.floor_zones=nil;self.next_floor_scan=nil end
++function H:Reset(c) if c then self:Release(c) end;self.pending=nil;self.seeking=nil;self.failed={};self.next_try=nil;self.seek_after=nil;self.next_search=nil;self.draining_until=nil;self.floor_zones=nil;self.next_floor_scan=nil;self.last_health=nil;self.hit_active=nil end
+ return H
+diff --git a/scripts/shadowself/control/coordinator.lua b/scripts/shadowself/control/coordinator.lua
+index ee0e55e..c26d5b2 100644
+--- a/scripts/shadowself/control/coordinator.lua
++++ b/scripts/shadowself/control/coordinator.lua
+@@ -142,6 +142,7 @@ function Coordinator:HitRecovery()
+         -- Hit state clears buffered actions; cancel only stale local equip waits.
+         self.gear.pending=nil;self.gear.failed={};self.gear.next_request=GetTime();self.next_move=nil
+         self.h.guid=0;self.last_action_kind=nil;self.attack_until=nil
++        if self.healing then self.healing:Interrupt(self) end
+     end
+     self.hit_active=hit or false
+ end
+diff --git a/scripts/shadowself/control/queendebug.lua b/scripts/shadowself/control/queendebug.lua
+index 737dc4c..c5739f4 100644
+--- a/scripts/shadowself/control/queendebug.lua
++++ b/scripts/shadowself/control/queendebug.lua
+@@ -1,5 +1,5 @@
+ -- 蜂后调试已移除。保留空接口供历史调用点使用，不采样、不计数、不打印。
+-local M={VERSION="0.13.2",enabled=false}
++local M={VERSION="0.13.3",enabled=false}
+ local function noop() end
+ for _,name in ipairs({"Configure","Start","Event","Change","Throttle","Block","Performed","Equip","Move","Hit","Sample"}) do M[name]=noop end
+ function M.End(c) if c then c._queen_debug=nil end end
+diff --git a/tests/arena_healing.lua b/tests/arena_healing.lua
+index a3d934d..0b0b90c 100644
+--- a/tests/arena_healing.lua
++++ b/tests/arena_healing.lua
+@@ -49,7 +49,7 @@ local c={player=p,plan={arena=true},enemies={},observed={},hazards={},gear={},sn
+  actions={SafePoint=function() return true end},
+  bridge={PauseAttack=function() pauses=pauses+1 end},
+  travel={BeginDodge=function(self) self.dodging=true end,EndDodge=function(self) self.dodging=nil end},
+- Latency=function() return .122 end,Speed=function() return 6 end}
++ Latency=function() return .122 end,Speed=function() return 7.5 end}
+ c.Move=function(_,q) moves=moves+1;c.goal=q end
+ local h=Healing(p);bag={pie,waffle,ball};hp=110
+ assert(h:Choose(c)==pie,'40 missing selects40-heal rather than wasting60 or repeatedly eating3')
+@@ -60,22 +60,34 @@ local before=pauses;assert(not h:Tick(c) and eats==0 and pauses==before,'do not
+ assert(h:BlockAttack('CloseAndAttack') and not h:BlockAttack('OnKeyFrame'),'drain blocks next attack while retaining current original post-hit step')
+ attacks=false;now=.04;assert(h:Tick(c) and eats==1 and h.pending)
+ now=.1;h:Tick(c);assert(eats==1 and h.pending,'no optimistic healing or repeated EAT while inventory unchanged')
+-hp=140;bag={};now=1.1;h:Tick(c);assert(not h.pending,'only inventory/health confirmation finishes meal')
++hp=81;now=1.1;h:Tick(c);assert(h.pending,'unrelated regeneration without eating evidence cannot acknowledge meal')
++hp=140;bag={};now=1.2;h:Tick(c);assert(not h.pending,'real inventory decrease still acknowledges a late interrupted meal')
+ assert(not p._shadowself_combat_buffs,'healing cannot fabricate electric buff bookkeeping')
+ 
+-local enemy=entity('hound',4,{hostile=true});enemy.replica.combat={GetAttackRangeWithWeapon=function() return 2 end}
++local enemy=entity('hound',9,{hostile=true});enemy.replica.combat={GetAttackRangeWithWeapon=function() return 2 end}
+ c.enemies={enemy};c.observed[enemy.GUID]={neutral=true};hp=30;bag={waffle};h:Reset();now=2
+ local count=eats;assert(h:Tick(c) and h.seeking and moves>0 and eats==count,'critical health finds reachable safe gap rather than eats in melee range')
++local seeking=h.seeking;c.travel.dodging=true;c.travel.restore_dodge=true
++h:Release(c,true);assert(c.travel.dodging and c.travel.restore_dodge,'healing release cannot clear another dodge owner flags')
++c.travel.dodging=nil;c.travel.restore_dodge=nil;h.seeking=seeking
+ p.pos=c.goal;now=2.2;assert(h:Tick(c) and eats==count+1 and not h.seeking and not c.travel.dodging,'cane retreat releases without extra equip before meal')
+ -- New side charge during a pending meal must yield to the normal dodge thread.
+ local rook=entity('rook',p.pos.x-10);rook.pos.z=p.pos.z;rook.anim='atk';rook.replica.combat={GetAttackRangeWithWeapon=function() return 2 end}
+ c.enemies={rook};c.observed={};now=2.3
+ assert(not h:Tick(c) and h.pending and eats==count+1,'side charge preempts pending meal without resending')
++assert(h.pending.interrupted,'interrupted meal never reacquires control when danger disappears')
++c.enemies={};now=2.4;assert(not h:Tick(c),'no ghost waiting after urgent dodge interrupted meal')
++c.healing=h;p.anim='hit';require('shadowself/control/coordinator').HitRecovery(c)
++assert(not h.seeking and not h.draining_until and h.pending.interrupted,'real hit-recovery entry releases healing intent')
++p.anim=nil;c.healing=nil
+ h:Reset();p.pos=Vector3(0,0,0);enemy.pos=Vector3(3,0,0);c.enemies={enemy};c.observed={[enemy.GUID]={dodge={atkanim='atk'}}};enemy.anim='atk';now=3
+ assert(not h:Tick(c) and not h.seeking,'urgent primary windup retains original dodge, not healing retreat')
+ enemy.anim=nil;enemy.pos=Vector3(20,0,0);c.observed={[enemy.GUID]={neutral=true}};c.hazards={{pos=Vector3(0,0,0),radius=2}}
+ hp=90;h:Reset();assert(not h:Tick(c),'unsafe floor vetoes even otherwise distant enemies')
+ c.hazards={};busy=true;assert(not h:Tick(c));busy=false
++enemy.pos=Vector3(1,0,0);enemy.tags.frozen=true
++assert(not h:Safe(c,p:GetPosition(),1),'near frozen unit has unknown remaining freeze time and can wake during meal')
++enemy.tags.frozen=nil;enemy.pos=Vector3(20,0,0)
+ local cloud=entity('sporecloud',0,{sporecloud=true});TheSim.FindEntities=function() return {cloud} end;h.next_floor_scan=nil
+ assert(not h:Tick(c),'persistent spore cloud vetoes eating even without a live enemy')
+ TheSim.FindEntities=function() return {} end;h.next_floor_scan=nil
+@@ -100,6 +112,58 @@ local mechanism=combatSource:find('local support=c.mechanisms:Tick()',1,true)
+ local boss=combatSource:find('c.bosses:Tick(target)',mechanism,true)
+ local healing=combatSource:find('support=c.healing:Tick(c)',mechanism,true)
+ assert(boss<healing,'real combat integration evaluates boss mechanisms before healing')
++-- Slow network/rejection without any eat animation cannot hold control for the whole timeout.
++h:Reset();hp=80;bag={waffle};now=14;p.anim=nil;assert(h:Tick(c))
++now=14.4;assert(not h:Tick(c) and h.pending.interrupted,'no-animation request releases ownership after start grace')
++h:Reset();hp=80;now=15;assert(h:Tick(c));hp=70;p.anim='hit';now=15.1
++assert(not h:Tick(c) and h.pending.interrupted,'intermission detects damage itself without a live native target')
++p.anim=nil
++-- Infinite server food needs actual eating evidence plus health change, not count alone.
++h:Reset();hp=80;now=16;assert(h:Tick(c));p.anim='quick_eat';now=16.1;h:Tick(c)
++hp=140;now=17.1;h:Tick(c);assert(not h.pending,'observed eating plus delayed health change acknowledges infinite food')
++p.anim=nil;c.intermission=nil
++-- Replay movement gradually while a monster also moves, rather than teleporting to a safe point.
++h:Reset();hp=30;now=20;p.pos=Vector3(0,0,0);enemy.pos=Vector3(9,0,0)
++c.enemies={enemy};c.observed={[enemy.GUID]={neutral=true}};assert(h:Tick(c) and h.seeking)
++local anchor=h.seeking.anchor;local goal=h.seeking.point
++for i=1,3 do
++ now=20+i*.2;p.pos=Vector3(-1.5*i,0,0);enemy.pos=Vector3(9-1.2*i,0,0)
++ local prev=eats;h:Tick(c)
++ if h.seeking then assert(h.seeking.point:DistSq(anchor)<=8^2) end
++ if i<3 then assert(eats==prev,'do not start meal before real moving separation is sufficient') end
++end
++assert(h.pending and h.pending.name=='waffles','predicted travel and actual separation open a meal window')
++-- A slower character cannot plan a fictitious gap against a faster advancing target.
++h:Reset();now=22;p.pos=Vector3(0,0,0);enemy.pos=Vector3(4,0,0)
++c.Speed=function() return 6 end;assert(not h:Tick(c) and not h.seeking,'unreachable safe endpoint must not create endless retreat')
++-- Use the real gear state machine and a delayed hand-slot acknowledgement.
++require('shadowself/legacy/combat_equipment')
++local sword=entity('nightsword',0,{weapon=true});local cane=entity('cane',0,{weapon=true})
++for _,item in ipairs({sword,cane}) do
++ item.replica.equippable={EquipSlot=function() return EQUIPSLOTS.HANDS end,IsRestricted=function() return false end}
++ item.replica.inventoryitem={GetEquipRestrictedTag=function() end,GetWalkSpeedMult=function() return item==cane and 1.25 or 1 end}
++end
++local equipped=sword;local equipment={}
++p.replica.inventory.GetEquippedItem=function() return equipped end
++c.owner={perception={Inventory=function() return bag end}};c.roles={CanRunForm=function() return false end,NaturalWeapon=function() return false end}
++c.actions.FindAction=function(_,name,_,item) return {name=name,invobject=item} end
++c.actions.Execute=function(_,act) equipment[#equipment+1]=act.invobject;return true end
++c.actions.Stop=function() end;c.gear=require('shadowself/legacy/registry').CombatEquipment(c)
++c.Speed=function() return 7.5 end;c.target=enemy;c.snapshot={night=false}
++bag={sword,cane,waffle};h:Reset();hp=30;enemy.pos=Vector3(9,0,0);now=24
++assert(h:Tick(c) and c.gear.pending.item==cane and #equipment==1)
++for i=1,3 do now=24+i*.03;local support=h:Tick(c);if not support then c.gear:Swap('attack',c.snapshot) end end
++assert(#equipment==1 and c.gear.pending.item==cane,'delayed cane ack cannot trigger contrary weapon equip on next supervisor frame')
++equipped=cane;now=24.12;assert(h:Tick(c) and not c.gear.pending and #equipment==1)
++p.anim=nil;require('shadowself/control/coordinator').HitRecovery(c)
++p.pos=c.goal;now=24.2;assert(h:Tick(c) and h.pending and #equipment==1,'meal does not restore weapon and eat concurrently')
++c.healing=h;p.anim='hit';require('shadowself/control/coordinator').HitRecovery(c)
++now=24.3;local support=h:Tick(c);assert(not support)
++if not support then c.gear:Swap('attack',c.snapshot) end
++assert(#equipment==2 and equipment[2]==sword,'after hurt normal combat restores weapon once')
++equipped=sword;p.anim=nil
++for i=1,3 do now=24.3+i*.03;local active=h:Tick(c);if not active then c.gear:Swap('attack',c.snapshot) end end
++assert(#equipment==2,'interrupted meal cannot start cane/weapon ping-pong')
+ package.loaded['shadowself/control/actions']=savedA;package.loaded['shadowself/control/arena_healing']=savedH;package.loaded['shadowself/control/arena_food']=savedF;package.loaded.cooking=savedCooking
+ GetTime=oldTime;TheWorld=oldWorld;TheNet=oldNet;TheSim=oldSim
+ print('PASS: official recipe recovery, spoilage/seasoning, meat/quick timings, deficit choice, safe low-health retreat, side-charge and ground danger priority, swing drain, authoritative pickup/eat confirmation, retry and intermission healing')
+diff --git a/tests/arena_lifecycle.lua b/tests/arena_lifecycle.lua
+index 7f5ef96..0221200 100644
+--- a/tests/arena_lifecycle.lua
++++ b/tests/arena_lifecycle.lua
+@@ -26,6 +26,7 @@ local p={tags={},replica={inventory={GetItems=function() return {} end}},compone
+ function p:HasTag(t) return self.tags[t] or false end
+ function p:GetPosition() return Vector3(0,0,0) end
+ local task=require('shadowself/control/arena')(p,{loop=true})
++task.NearbyEnemies=function() return {} end
+ task.Entities=function() return {{IsValid=function() return true end,GetPosition=function() return Vector3(2,0,0) end}},{} end
+ task.Loot=function() return false end;task.Equip=function() return false end
+ assert(task:Tick()=='running' and prepares==1 and starts==0,'no combat before server-confirmed arena instance')
+diff --git a/tests/arena_runtime.lua b/tests/arena_runtime.lua
+new file mode 100644
+index 0000000..dfc8883
+--- /dev/null
++++ b/tests/arena_runtime.lua
+@@ -0,0 +1,50 @@
++-- 执行真实Arena循环，模拟两次查询之间刷怪，以及跨帧/跨波缓存变化。
++local keys={'shadowself/control/actions','shadowself/control/combat','shadowself/control/arena_adapter','shadowself/control/arena_healing','shadowself/control/arena'}
++local saved={};for _,k in ipairs(keys) do saved[k]=package.loaded[k] end
++local oldTime,oldSim,oldWorld=GetTime,TheSim,TheWorld
++local now=0;GetTime=function() return now end
++local starts,stops,loot,heals,farCalls=0,0,0,0,0;local active=false
++local snapshot={state={},instance='run',generation=1,kind='PARTICIPANT',arena=true,wave=1,route='default'}
++local player={replica={inventory={GetItems=function() return {} end,GetEquips=function() return {} end,GetOverflowContainer=function() end,GetEquippedItem=function() end}},components={playercontroller={IsBusy=function() return false end}}}
++function player:GetPosition() return Vector3(0,0,0) end
++function player:HasTag() return false end
++package.loaded['shadowself/control/actions']={Items=function() return {} end,Scene=function() loot=loot+1;return false end,Stop=function() end}
++package.loaded['shadowself/control/combat']=function() return {Running=function() return active end,Start=function() starts=starts+1;active=true;return true end,Stop=function() stops=stops+1;active=false end} end
++package.loaded['shadowself/control/arena_adapter']=function() return {Snapshot=function() return snapshot end,Cancel=function() end} end
++package.loaded['shadowself/control/arena_healing']=function() return {Health=function() return false end,Reset=function() end,Tick=function() heals=heals+1;return true end} end
++package.loaded['shadowself/control/arena']=nil
++local Arena=require('shadowself/control/arena');local task=Arena(player,{})
++task.instance='run';task.generation=1;task.route='default'
++local items={};local spawned
++for i=1,10 do
++ local e={prefab=i%2==0 and 'waffles' or 'meatballs',GUID=99000+i,replica={inventoryitem={IsHeld=function() return false end}}}
++ function e:IsValid() return not self.removed end
++ function e:GetPosition() return Vector3(i,0,1) end
++ function e:HasTag() return false end
++ function e:GetBasicDisplayName() return self.prefab end
++ items[#items+1]=e
++end
++TheSim={FindEntities=function(_,x,y,z,r)
++ if r==60 then farCalls=farCalls+1;local result={};for _,e in ipairs(items) do result[#result+1]=e end;return result end
++ if r==24 and spawned then return {spawned} end
++ return {}
++end}
++TheWorld={Map={IsPassableAtPoint=function() return true end,IsOceanAtPoint=function() return false end}}
++local Inventory=require('shadowself/control/arena_inventory');local priority=Inventory.Priority;local evaluations=0
++Inventory.Priority=function(...) evaluations=evaluations+1;return priority(...) end
++local enemies,drops=task:Entities();assert(#enemies==0 and #drops==10 and farCalls==1 and evaluations==10,'priority calculated once per item, not sort comparator')
++items[1].removed=true;now=.05;enemies,drops=task:Entities();assert(#drops==9 and farCalls==1,'raw list cache filters invalid entities each frame')
++now=.21;task:Entities();assert(farCalls==2,'far supply scan has bounded cadence')
++snapshot.wave=2;now=.22;task:Tick();assert(farCalls==3,'authoritative wave change immediately invalidates far cache')
++spawned={prefab='hound',GUID=99999,replica={combat={}}}
++function spawned:IsValid() return true end
++function spawned:HasTag(name) return name=='dead' and self.dead or false end
++function spawned:GetPosition() return Vector3(2,0,0) end
++local attempts=loot;now=.23;task:Tick()
++assert(starts==1 and active and heals==0 and loot==attempts,'fresh close scan interrupts intermission before new spawn can be mistaken for safe loot/eat time')
++now=.24;task:Tick();assert(starts==1 and stops==0,'fresh near spawn merged into cache avoids stop/start oscillation')
++spawned.dead=true;now=.25;task:Tick();assert(not active and stops==1,'dead body with delayed replica health cannot retain combat forever')
++Inventory.Priority=priority
++for _,k in ipairs(keys) do package.loaded[k]=saved[k] end
++GetTime=oldTime;TheSim=oldSim;TheWorld=oldWorld
++print('PASS: real arena cross-frame loop; bounded raw scan and one priority evaluation/item; invalid/dead filtering; immediate wave cache reset; fresh near spawn blocks rest and preserves existing combat owner')
+diff --git a/tools/verify51.py b/tools/verify51.py
+index 253716c..0db5173 100644
+--- a/tools/verify51.py
++++ b/tools/verify51.py
+@@ -18,7 +18,7 @@ with zipfile.ZipFile(Path("D:/Steam/steamapps/common/Don't Starve Together/data/
+     runtime.globals().read_3014_dodge=lambda:(ROOT/'scripts/shadowself/native/engine/Dodge.lua').read_text(encoding='utf8')
+     suites=['offline','render_lifecycle','conversation','daily','speech','voice','control','actions_clock','merge','native_merge','coordinator','maxwell','personality','thought_cooking','batch_cooking','navigation','fishing_queen','battlemusic','secondary_travel','dodge_cane','combat103','native_food','grinding','chat_ui','knowledge','combat112','combat114','combat115','combat116','combat117','combat118','combat119','combat120','combat121','combat122','combat123','combat124','combat125','combat126','combat128','queen_debug_removed','queen_flute_recovery','queen_phase1','queen_phase3','server_combat','boss140','boss141','boss142','network_movement','network_combat','combat144','native_embedded','walka_original','swing146','combat147']
+     runtime.globals().read_astra_source=lambda path:(Path('D:/Steam/steamapps/workshop/content/322330/3816458126/scripts')/path).read_text(encoding='utf8')
+-    suites.extend(['arena_protocol','arena_lifecycle','arena_planning','arena_healing'])
++    suites.extend(['arena_protocol','arena_lifecycle','arena_planning','arena_healing','arena_runtime'])
+     for name in (sys.argv[2].split(',') if len(sys.argv)>2 else suites):
+         runtime.execute((ROOT/'tests'/f'{name}.lua').read_text(encoding='utf8'))
+ print('PASS: Lua 5.1 regression complete; gameplay remains untested')

@@ -58,6 +58,13 @@ function Gear:Damage(item)
     local damage=w and type(w.damage)=="number" and w.damage or DAMAGE[item.prefab] or 34
     if item.prefab=="hambat" then
         local percent=read(item.replica and item.replica.inventoryitem,"GetPerishPercent",1)
+        if self.combat and self.combat.plan and self.combat.plan.arena then
+            local perish=item.components and item.components.perishable
+            local ii=item.replica and item.replica.inventoryitem
+            local net=ii and ii.classified and ii.classified.perish
+            if perish and perish.GetPercent then percent=perish:GetPercent()
+            elseif net and net:value()~=63 then percent=net:value()/62 end
+        end
         damage=damage*(.5+.5*percent)
     end
     return damage

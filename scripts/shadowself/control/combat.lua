@@ -40,6 +40,7 @@ function Bridge:Start(plan,matches)
         if e:HasTag("INLIMBO") or e:HasTag("isdead") or e:HasTag("dead") then return false end
         local health=e.replica and e.replica.health
         if health and health.IsDead and health:IsDead() then return false end
+        if plan.arena and plan.arena_contains and plan.arena_contains(e) and e.replica and e.replica.combat then return true end
         if self.resume_target==e or self.priority_target==e then return true end
         if self.coordinator and self.coordinator.encounters and self.coordinator.encounters.allowed[e] then return true end
         if self.coordinator and self.coordinator.beequeen and self.coordinator.beequeen.allow==e then return true end
@@ -181,7 +182,9 @@ function Bridge:Supervise()
                     end
                     if not support and not mode and c.bosses then mode,picked=c.bosses:Tick(target) end
                     if not support and not mode and c.encounters then mode,picked=c.encounters:Tick(target) end
-                    if not support and mode~="move" and mode~="support" and c.supplies then support=c.supplies:Tick() end
+                    if not support and mode~="move" and mode~="support" and c.healing then support=c.healing:Tick(c) end
+                    if not support and mode~="move" and mode~="support" and c.supplies
+                     and not (c.healing and (c.healing.pending or GetTime()<(c.healing.draining_until or 0))) then support=c.supplies:Tick() end
                     if picked and picked~=target then target=picked;h.ent=target;self.wrappers.PreTheLoop.old(h) end
                     if support or mode=="move" or mode=="support" then
                         self:PauseAttack()
@@ -221,7 +224,9 @@ function Bridge:Supervise()
                     end
                 else
                     self:PauseAttack();self.chasing=nil;c.travel.chasing=nil
-                    c:Scan();c.mechanisms=c.mechanisms or require("shadowself/control/mechanisms")(c);c.mechanisms:Tick()
+                    c:Scan();c.mechanisms=c.mechanisms or require("shadowself/control/mechanisms")(c)
+                    local danger=c.mechanisms:Tick()
+                    if not danger and c.healing then c.healing:Tick(c) end
                 end
             end
             Debug.Sample(self.coordinator and self.coordinator.beequeen)
@@ -296,6 +301,7 @@ function Bridge:Coordinate(plan)
         wrap(name,function(old,object,...)
             local c=self.coordinator
             if self.pause_requested then return false end
+            if c.healing and c.healing:BlockAttack(name) then return false end
             local explicit=...;local victim=(name=="CloseAndAttack" or name=="ShouldAtkWhenDodging") and type(explicit)=="table" and explicit.prefab and explicit or object.ent
             if require("shadowself/control/targetpolicy").Rook(victim) and require("shadowself/control/targetpolicy").Other(self,victim) then return false end
             if c.crabking and c.crabking:Active() and not c.crabking:Allowed(victim) then return false end

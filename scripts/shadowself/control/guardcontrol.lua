@@ -2,6 +2,9 @@
 local Status=require("shadowself/control/status")
 local Debug=require("shadowself/control/queendebug")
 local G={MAX_FREEZES=3,MAX_SHOTS=4,PROJECTILE_WAIT=1}
+function G.Ice(c,item)
+ return item and (item.prefab=="icestaff" or c.plan and c.plan.arena and (item.prefab=="icestaff2" or item.prefab=="icestaff3")) or false
+end
 function G.Observe(q,bees,now)
  q.guard_stats=q.guard_stats or {}
  for e in pairs(q.guard_stats) do if not e:IsValid() or e:HasTag("isdead") or e:HasTag("dead") then q.guard_stats[e]=nil end end
@@ -41,7 +44,7 @@ function G.OnAction(c,data)
  local target=act.target
  if act.action~=ACTIONS.ATTACK or not target or target.prefab~="beeguard" or q.recycle_guard==target then return end
  local item=act.invobject or c.player.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)
- if not item or item.prefab~="icestaff" then return end
+ if not G.Ice(c,item) then return end
  q.guard_stats=q.guard_stats or {};local s=q.guard_stats[target] or {freezes=0,shots=0};q.guard_stats[target]=s
  s.shots=s.shots+1;s.last_shot=GetTime()
  Debug.Event(c,"guard_ice_shot",{guard=Debug.Entity(target),shots=s.shots,freezes=s.freezes})

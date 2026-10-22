@@ -21,7 +21,16 @@ end
 function Queen:Item(prefab)
  self.item_choice=self.item_choice or {}
  local p=self.c.player;local gear=self.c.gear
- return require("shadowself/control/itemchoice").Pick(self.item_choice,prefab,A.Items(p),p.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS),gear and gear.pending)
+ local items=A.Items(p);local hand=p.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)
+ local pick=require("shadowself/control/itemchoice").Pick
+ if prefab=="icestaff" and self.c.plan and self.c.plan.arena then
+  local old=self.item_choice.arena_ice
+  for _,item in ipairs(items) do if item==old and item:IsValid() and not item:HasTag("broken") then return item end end
+  local chosen
+  for _,name in ipairs({"icestaff2","icestaff3","icestaff"}) do chosen=pick(self.item_choice,name,items,hand,gear and gear.pending);if chosen then break end end
+  self.item_choice.arena_ice=chosen;return chosen
+ end
+ return pick(self.item_choice,prefab,items,hand,gear and gear.pending)
 end
 -- 固定战场中心，不随着蜂后/玩家的位置不断向外漂移。
 function Queen:Anchor(queen)
@@ -224,7 +233,7 @@ function Queen:Tick()
             -- 即使人物正忙、法杖尚未装备或攻击冷却未到，蜂后出招也先走位。
             if require("shadowself/control/guarddefence").Tick(self,queen,now) then return true end
             local stats=self.guard_stats and self.guard_stats[nearest]
-            if wand.prefab=="icestaff" and stats and stats.shots>=GuardControl.MAX_SHOTS then
+            if GuardControl.Ice(self.c,wand) and stats and stats.shots>=GuardControl.MAX_SHOTS then
                 -- 等最后一发弹道/复制反馈，期间禁止继续补冰；近身守卫先拉开。
                 local bp=nearest:GetPosition();local d=math.sqrt(pos:DistSq(bp))
                 if d<3 then

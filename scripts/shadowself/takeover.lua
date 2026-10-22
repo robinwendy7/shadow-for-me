@@ -89,7 +89,7 @@ function Takeover:HandleText(text)
         if not ok then self.pending=nil;if self.r.speech then self.r.speech:ClearPin() end;self:Say(why);return true end
         local plan=self.pending.plan;self.pending=nil
         if self.r.speech then self.r.speech:ClearPin() end
-        if plan.kind~="fight" and plan.kind~="dodge" and plan.kind~="autonomy" then plan.protect=true end
+        if plan.kind~="fight" and plan.kind~="dodge" and plan.kind~="autonomy" and plan.kind~="arena" then plan.protect=true end
         if self.phase=="active" then
             self.task=plan;self.jobs:Set(plan);self.job_started=nil
             self:Speak("enter",{task=plan.label})
@@ -135,6 +135,10 @@ function Takeover:Tick()
     if self.pending and GetTime()>self.pending.until_time then self.pending=nil;self:Say("接管确认超时了。我没有执行刚才的任务。") end
     if not self.phase then return end
     local p=self.r.owner
+    if p:IsValid() and self.task and self.task.kind=="arena" and self.phase=="active"
+        and (p:HasTag("playerghost") or p:HasTag("corpse") or self.r.dead) then
+        self.jobs:Tick();return
+    end
     if not p:IsValid() or p:HasTag("playerghost") or p:HasTag("corpse") or p.AnimState:IsCurrentAnimation("death") or self.r.dead then
         self:Stop("你倒下了，接管已经停止。我会以灵魂陪着你。");return
     end

@@ -76,6 +76,11 @@ local function BasicParse(text)
 end
 -- 旧基础行为保留；新增 zom 的多步、数量及更多交互。
 function M.Parse(text)
+    if M.IsStop(text) then return nil end
+    if text:find("角斗场",1,true) and (text:find("循环",1,true) or text:find("自动",1,true) or text:find("帮我打",1,true)) then
+        if text:find("不要",1,true) or text:find("别",1,true) or text:find("不需要",1,true) then return nil,"好，不开启角斗场循环。" end
+        return {kind="arena",loop=true,label="经典单人角斗场循环",text=text}
+    end
     local fish=(text:find("钓鱼",1,true) or text:find("海钓",1,true) or text:find("钓海鱼",1,true) or text:find("池塘钓",1,true))
     local fishing_command=text:find("帮我",1,true) or text:find("替我",1,true) or text:match("^海钓") or text:match("^钓鱼") or text:match("^去钓") or text:match("^自动钓")
     if fish and fishing_command and not (text:find("不要",1,true) or text:find("别",1,true) or text:find("不会",1,true) or text:find("会不会",1,true)) then
