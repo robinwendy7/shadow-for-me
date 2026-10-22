@@ -30,6 +30,10 @@ package.loaded['astra/ui/lobby_client']={New=function() return c end}
 package.loaded['astra/ui/mode_hud_client']={New=function() return {Refresh=function() end,GetModel=function() end,GetTarget=function() end} end}
 local oldSet=package.loaded['astra/net/settlement_hud_state'];package.loaded['astra/net/settlement_hud_state']={}
 local Adapter=require('shadowself/control/arena_adapter');local adapter=Adapter(player)
+adapter.hud.GetModel=function() return {title='角斗场',status={text='波次间休整'},rows={{id='wave',value='2 / 15'}}} end
+assert(adapter:Snapshot().intermission==true,'server HUD intermission recognized')
+adapter.hud.GetModel=function() return {title='角斗场',status={text='战斗中'},rows={{id='wave',value='2 / 15'}}} end
+assert(adapter:Snapshot().intermission==false,'active combat is not a waiting period')
 adapter:Prepare({state=state});assert(c.requests[1].a=='LOBBY_CONFIGURE')
 now=2;adapter:Prepare({state=state});assert(#c.requests==1,'pending configure cannot cause repeated starts')
 c.pending={};state.preparation.selection={mode_id='ARENA',variant_id='ARENA_CLASSIC_SOLO'}

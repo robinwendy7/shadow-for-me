@@ -70,7 +70,9 @@ function Gear:Damage(item)
     return damage
 end
 function Gear:Weapon()
-    if self.forced_weapon and self:Owned(self.forced_weapon) and E.Usable(self.player,self.forced_weapon) then return self.forced_weapon end
+    local plan=self.combat and self.combat.plan
+    local no_whip=plan and plan.arena and plan.arena_no_whip and plan.arena_no_whip()
+    if self.forced_weapon and not (no_whip and self.forced_weapon.prefab=="whip") and self:Owned(self.forced_weapon) and E.Usable(self.player,self.forced_weapon) then return self.forced_weapon end
     local items,hand=self:Items();local best,bestscore
     local policy=require("shadowself/control/targetpolicy")
     local damage=require("shadowself/control/weapon_damage")
@@ -80,7 +82,7 @@ function Gear:Weapon()
     local boss=policy.Boss(target)
     local electric=damage.Electric(self.player)
     local wet=target and (target.GetIsWet and target:GetIsWet() or target:HasTag("wet"))
-    for _,item in ipairs(items) do if E.Weapon(self.player,item) then
+    for _,item in ipairs(items) do if E.Weapon(self.player,item) and not (no_whip and item.prefab=="whip") then
         local travel=E.Mult(item)>=1.2 or item.prefab=="cane" or item.prefab=="orangestaff"
         local score=damage.Score(self.player,item,self:Damage(item),target)+(item==hand and .1 or 0)-(travel and 1000 or 0)
         if item.prefab=="nightstick" and electric then score=score-10000 end

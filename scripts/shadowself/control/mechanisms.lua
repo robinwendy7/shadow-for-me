@@ -30,6 +30,9 @@ function Mechanisms:Scan()
         c.bosses.entities=entities
         for _,zone in ipairs(c.bosses:Zones(entities)) do self.zones[#self.zones+1]=zone end
     end
+    if c.plan and c.plan.arena then
+        for _,z in ipairs(require("shadowself/control/arena_fire").Zones(c.player,entities)) do self.zones[#self.zones+1]=z end
+    end
     for _,e in ipairs(entities) do if e:IsValid() then
         local name=e.prefab or "";seen[e]=true
         if name=="spore_moon" and (anim(e,"rumble") or anim(e,"explode") and frame(e)<4) then

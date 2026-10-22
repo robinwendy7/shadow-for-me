@@ -44,6 +44,7 @@ function H:Safe(c,point,window)
    if e.prefab=="sporecloud" and e:HasTag("sporecloud") then radius=(TUNING.TOADSTOOL_SPORECLOUD_RADIUS or 3.5)+.8
    elseif e.prefab=="honey_trail" then radius=1.6
    elseif e.prefab=="worm_boss_dirt_ground_fx" then radius=4.5 end
+   if not radius then local z=require("shadowself/control/arena_fire").Zone(e,self.player);radius=z and z.radius end
    if radius and e:IsValid() then self.floor_zones[#self.floor_zones+1]={entity=e,pos=e:GetPosition(),radius=radius} end
   end
  end

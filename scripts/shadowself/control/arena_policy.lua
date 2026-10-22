@@ -27,6 +27,15 @@ for _,routes in pairs(Data.encounters) do for _,choices in pairs(routes) do for 
  end end
 end end end
 for _,name in ipairs({"beeguard","crabking_mob","crabking_mob_knight","crabking_icewall","worm_boss_dirt","wagdrone_rolling","wagdrone_flying","lunarthrall_plant_vine","stalker_minion1","stalker_minion2","klaus","deer_red","deer_blue"}) do P.monsters[name]=true end
+-- 二、三关场景法杖是猎狗陷阱，清怪和普通补给结束后才允许拾取。
+function P.TrapLoot(item,wave)
+ return (wave==2 or wave==3) and (item.prefab=="firestaff" or item.prefab=="icestaff")
+end
+function P.DormantTrapGuard(e,wave)
+ if (wave~=2 and wave~=3) or (e.prefab~="icehound" and e.prefab~="firehound") then return false end
+ local a=e.AnimState
+ return e:HasTag("sleeping") or a and (a:IsCurrentAnimation("sleep_pre") or a:IsCurrentAnimation("sleep_loop") or a:IsCurrentAnimation("sleep_pst")) or false
+end
 function P.Keep(name,wave)
  if P.reserve[name] then return true end
  for i=wave or 1,15 do for _,v in ipairs(P.waves[i].keep) do if v==name then return true end end end

@@ -8,6 +8,7 @@ local Arena=Class(function(self,player,plan,report)
  self.since=GetTime();self.running=true;self.runs=0;self.wave=1;self.ignored={}
  self.encounters=require("shadowself/control/arena_encounters")(self)
  self.healing=require("shadowself/control/arena_healing")(player)
+ self.opening=require("shadowself/control/arena_opening")(self)
 end)
 function Arena:Say(message)
  if self.message~=message then self.message=message;self.report(message) end
@@ -30,7 +31,7 @@ function Arena:Entities()
  for _,e in ipairs(self.entities) do
   if e~=self.player and e:IsValid() and not e:HasTag("player") then
    local health=e.replica and e.replica.health
-   if Policy.monsters[e.prefab] and e.replica and e.replica.combat and not e:HasTag("isdead") and not e:HasTag("dead") and not (health and health:IsDead()) then enemies[#enemies+1]=e
+   if Policy.monsters[e.prefab] and e.replica and e.replica.combat and not e:HasTag("isdead") and not e:HasTag("dead") and not (health and health:IsDead()) and not Policy.DormantTrapGuard(e,self.wave) then enemies[#enemies+1]=e
    elseif Policy.known[e.prefab] and e.replica and e.replica.inventoryitem and not e.replica.inventoryitem:IsHeld() then items[#items+1]=e end
   end
  end
@@ -48,18 +49,43 @@ function Arena:Inventory()
  for _,item in ipairs(items) do owned[item.prefab]=true end
  return owned,items
 end
-function Arena:Loot(items)
+function Arena:Loot(items,cleared)
  local owned,bag=self:Inventory();local inv=self.player.replica.inventory
  if self.pending_item then
   local held=false;for _,i in ipairs(bag) do if i==self.pending_item then held=true;break end end
-  if held or not self.pending_item:IsValid() then self.pending_item=nil;self.pick_deadline=nil
+  if held or not self.pending_item:IsValid() then
+   if held and Inventory.Armor(self.pending_item) then self.equip_due=true end
+   self.pending_item=nil;self.pick_deadline=nil
   elseif GetTime()<(self.pick_deadline or 0) then return true
   else self.ignored[self.pending_item.GUID]=GetTime()+5;self.pending_item=nil end
  end
- if self.player.components.playercontroller:IsBusy() or GetTime()<(self.next_item or 0) then return true end
+ if self.player.components.playercontroller:IsBusy() then return true end
+ if self.equip_due then
+  if GetTime()<(self.next_equip or 0) or self:Equip(self.enemies or {}) then return true end
+  self.equip_due=nil
+ end
+ if GetTime()<(self.next_item or 0) then return true end
  local wanted
  for _,item in ipairs(items) do
-  if GetTime()>=(self.ignored[item.GUID] or 0) and Inventory.Want(item,bag,self.player,self.wave) then wanted=item;break end
+  if GetTime()>=(self.ignored[item.GUID] or 0) and Inventory.Want(item,bag,self.player,self.wave) and require("shadowself/control/arena_fire").Safe(self.player,item:GetPosition(),self.fire_zones) then wanted=item;break end
+ end
+ -- 普通补给先拿；法杖不能在开战前或清怪缓存过期时触发陷阱。
+ if wanted and Policy.TrapLoot(wanted,self.wave) then wanted=nil end
+ if not wanted then
+  for _,item in ipairs(items) do
+   if not Policy.TrapLoot(item,self.wave) and GetTime()>=(self.ignored[item.GUID] or 0)
+    and Inventory.Want(item,bag,self.player,self.wave) and require("shadowself/control/arena_fire").Safe(self.player,item:GetPosition(),self.fire_zones) then wanted=item;break end
+  end
+ end
+ if not wanted and cleared then
+  for _,item in ipairs(items) do
+   if Policy.TrapLoot(item,self.wave) and GetTime()>=(self.ignored[item.GUID] or 0)
+    and Inventory.Want(item,bag,self.player,self.wave) and require("shadowself/control/arena_fire").Safe(self.player,item:GetPosition(),self.fire_zones) then
+    -- 拿陷阱前覆盖整个补给扫描范围，不能只凭近处24码或旧缓存判清场。
+    if #self:NearbyEnemies(60)>0 then return false end
+    wanted=item;break
+   end
+  end
  end
  if not wanted then return false end
  self:StopCombat()
@@ -82,9 +108,9 @@ function Arena:Loot(items)
  end
  self.ignored[wanted.GUID]=GetTime()+3;return false
 end
-function Arena:Prune()
+function Arena:Prune(upcoming)
  if self.player.components.playercontroller:IsBusy() or GetTime()<(self.next_item or 0) then return false end
- local _,bag=self:Inventory();local item=Inventory.Discard(bag,self.player,self.wave)
+ local _,bag=self:Inventory();local item=upcoming and Inventory.ForecastDiscard(bag,self.player,self.wave,self.route) or Inventory.Discard(bag,self.player,self.wave)
  if item then
   self:StopCombat();self.player.replica.inventory:DropItemFromInvTile(item,false)
   self.ignored[item.GUID]=math.huge;self.next_item=GetTime()+.5;return true
@@ -94,6 +120,12 @@ end
 function Arena:Equip(enemies)
  if self.player.components.playercontroller:IsBusy() or self.player:HasTag("attack") or GetTime()<(self.next_equip or 0) then return false end
  local inv=self.player.replica.inventory;local _,items=self:Inventory()
+ if self.equip_pending then
+  local pending=self.equip_pending
+  if inv:GetEquippedItem(pending.slot)==pending.item or not pending.item:IsValid() then self.equip_pending=nil
+  elseif GetTime()<pending.deadline then return true
+  else self.equip_pending=nil end
+ end
  for _,slot in ipairs({EQUIPSLOTS.HEAD,EQUIPSLOTS.BODY}) do
   local hand=inv:GetEquippedItem(slot);local best=hand;local score=hand and Policy.ArmorScore(hand,slot,enemies) or -1
   score=score or -1
@@ -102,13 +134,16 @@ function Arena:Equip(enemies)
     if value and value>score then best,score=item,value end
    end
   end
-  if best and best~=hand then self:StopCombat();self.next_equip=GetTime()+.5;return A.Self(self.player,best,ACTIONS.EQUIP) end
+  if best and best~=hand then
+   self:StopCombat();self.next_equip=GetTime()+.5
+   if A.Self(self.player,best,ACTIONS.EQUIP) then self.equip_pending={item=best,slot=slot,deadline=GetTime()+2};return true end
+  end
  end
  return false
 end
 function Arena:Combat()
  if self.bridge:Running() then return true end
- local plan={kind="fight",target="",coordinated=true,arena=true,arena_healing=self.healing,arena_ground=function() return self.items or {} end,arena_contains=function(e)
+ local plan={kind="fight",target="",coordinated=true,arena=true,arena_healing=self.healing,arena_no_whip=function() return self.trap_dogs end,arena_ground=function() return self.items or {} end,arena_contains=function(e)
   return Policy.monsters[e.prefab] and self.encounters:Allowed(e) and self.player:GetPosition():DistSq(e:GetPosition())<60^2
  end}
  local ok,why=self.bridge:Start(plan,function() return true end)
@@ -116,13 +151,13 @@ function Arena:Combat()
  if self.encounters.worm_target or self.encounters.add_target then self.bridge.priority_target=self.encounters.worm_target or self.encounters.add_target end
  return true
 end
-function Arena:NearbyEnemies()
+function Arena:NearbyEnemies(range)
  -- 大范围补给列表允许缓存，但进食前必须重新检查近处新生成的怪。
  local near={};local p=self.player:GetPosition()
- for _,e in ipairs(TheSim:FindEntities(p.x,0,p.z,24,nil,{"INLIMBO","FX","DECOR","isdead","playerghost"})) do
+ for _,e in ipairs(TheSim:FindEntities(p.x,0,p.z,range or 24,nil,{"INLIMBO","FX","DECOR","isdead","playerghost"})) do
   local h=e.replica and e.replica.health
   if e~=self.player and e:IsValid() and Policy.monsters[e.prefab] and e.replica and e.replica.combat
-   and not e:HasTag("dead") and not e:HasTag("isdead") and not (h and h:IsDead()) then near[#near+1]=e end
+   and not e:HasTag("dead") and not e:HasTag("isdead") and not (h and h:IsDead()) and not Policy.DormantTrapGuard(e,self.wave) then near[#near+1]=e end
  end
  if self.raw_entities and #near>0 then
   local found={};for _,e in ipairs(self.raw_entities) do found[e]=true end
@@ -159,15 +194,30 @@ function Arena:Tick()
  if snapshot.instance and snapshot.kind=="PARTICIPANT" then
   if not snapshot.arena or not snapshot.wave then self:StopCombat();return "running" end
   if self.instance~=snapshot.instance or self.generation~=snapshot.generation then
-   self:StopCombat();self.instance=snapshot.instance;self.generation=snapshot.generation;self.runs=self.runs+1;self.ignored={};self.pending_item=nil;self.encounters:Reset();self.healing:Reset();self.raw_entities=nil
+   self:StopCombat();self.instance=snapshot.instance;self.generation=snapshot.generation;self.runs=self.runs+1;self.ignored={};self.pending_item=nil;self.encounters:Reset();self.opening:Reset();self.healing:Reset();self.raw_entities=nil
   end
   self.settling=nil;self.since=GetTime()
   if self.wave~=snapshot.wave or self.route~=snapshot.route then
-   self.wave=snapshot.wave;self.route=snapshot.route;self.pending_item=nil;self.ignored={};self.encounters:Reset();self.raw_entities=nil
+   self.wave=snapshot.wave;self.route=snapshot.route;self.pending_item=nil;self.ignored={};self.encounters:Reset();self.opening:Reset();self.raw_entities=nil
    local policy=Policy.waves[self.wave];self:Say("角斗场第"..self.wave.."关："..(policy and policy.note or "按当前敌人处理。"))
   end
   local enemies,items=self:Entities()
-  self.items=items
+  self.items=items;self.enemies=enemies
+  self.trap_dogs=false
+  if self.wave==2 or self.wave==3 then
+   for _,e in ipairs(self.entities or {}) do if (e.prefab=="icehound" or e.prefab=="firehound") and e:IsValid() and not e:HasTag("dead") and not e:HasTag("isdead") then self.trap_dogs=true;break end end
+  end
+  local fire=require("shadowself/control/arena_fire");local p=self.player:GetPosition()
+  self.fire_zones=fire.Zones(self.player,TheSim:FindEntities(p.x,0,p.z,16,nil,{"INLIMBO"}))
+  if not self.bridge:Running() then
+   local escape=fire.Escape(self.player,self.fire_zones)
+   if escape then
+    self.pending_item=nil
+    if GetTime()>=(self.next_fire_move or 0) then A.Move(self.player,escape);self.next_fire_move=GetTime()+.15 end
+    return "running"
+   end
+  end
+  if fire.Safe(self.player,self.player:GetPosition(),self.fire_zones) and self.opening:Tick(enemies) then return "running" end
   local mode,message=self.encounters:Tick(self.entities or {})
   if mode=="failed" then self:StopCombat();return "failed",message end
   if mode=="hold" then return "running" end
@@ -186,10 +236,13 @@ function Arena:Tick()
    -- 最后一只怪死亡时，让已开始的进食先收到确认，不能StopCombat把料理动作取消。
    if self.bridge:Running() and self.healing.pending and not self.healing.pending.interrupted then self.bridge:PauseAttack();return "running" end
    self:StopCombat()
+   -- 只有服务器确认关间休整且全场无活怪，才按下一关必出武器提前丢弃。
+   if snapshot.intermission and not self.pending_item and not self.healing.pending
+    and #self:NearbyEnemies(60)==0 and self:Prune(true) then return "running" end
    local resting=self:Rest(near)
    if resting then return "running" end
    -- 拾取在服务器确认前仍占用本次操作，避免换装覆盖走向物品的动作。
-   if not self:Loot(items) and not self:Equip(enemies) then self:Prune() end
+   if not self:Loot(items,true) and not self:Equip(enemies) then self:Prune() end
    return "running"
   end
   -- 前置补给优先；已经交战后拾取不抢走走位进程。
@@ -203,6 +256,7 @@ function Arena:Tick()
     if self:Loot(items) or self:Equip(enemies) then return "running" end
    else self.pending_item=nil end
   end
+  if not self.bridge:Running() and not self.pending_item and self:Equip(enemies) then return "running" end
   local ok,message=self:Combat();if not ok then return "failed",message end
   return "running"
  end

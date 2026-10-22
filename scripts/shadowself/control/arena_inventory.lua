@@ -1,4 +1,4 @@
--- 本局实际持有物品决定取舍；不把尚未掉落的装备当作已有替代品。
+-- 战斗中按实际持有取舍；关间休整允许按下一关必出武器提前腾出背包。
 local Policy=require("shadowself/control/arena_policy")
 local Damage=require("shadowself/control/weapon_damage")
 local Food=require("shadowself/control/arena_food")
@@ -75,6 +75,40 @@ function P.Obsolete(item,bag,player,wave)
  if item.prefab=="boomerang" and wave>=3 or item.prefab=="staff_tornado" and wave>=7 or item.prefab=="torch" and wave>=10 then return true end
  return false
 end
+-- 仅预测确定会刷新的常规近战武器；概率掉落和特殊用途装备不提前淘汰。
+local forecast_weapons={spear=true,tentaclespike=true,hambat=true,nightsword=true,ruins_bat=true,
+ glasscutter=true,sword_lunarplant=true,voidcloth_scythe=true,shadow_battleaxe=true,
+ spear_wathgrithr_lightning=true,spear_wathgrithr_lightning_charged=true}
+function P.ForecastDiscard(bag,player,wave,route)
+ local nextwave=wave+1
+ local supplies=require("shadowself/data/arena_classic").supplies[nextwave]
+ if not supplies then return nil end
+ local routes={}
+ -- 第11关随机分线尚未确定时，对所有可能路线取交集。
+ if nextwave<=10 then routes={supplies.default}
+ elseif nextwave~=11 and supplies[route or ""] then routes={supplies[route]}
+ else for _,sets in pairs(supplies) do routes[#routes+1]=sets end end
+ for _,item in ipairs(bag) do
+  if not P.Special(item.prefab,wave) and P.Weapon(item,player) then
+   local guaranteed=#routes>0
+   for _,sets in ipairs(routes) do
+    if #sets==0 then guaranteed=false end
+    for _,set in ipairs(sets) do
+     local better=false
+     for _,drop in ipairs(set) do
+      if forecast_weapons[drop.prefab] and (drop.probability or 1)>=1 and (drop.amount or 1)>0 then
+       local future={prefab=drop.prefab}
+       if P.Physical(future)>P.Physical(item) and Damage.Planar(future)>=Damage.Planar(item) then better=true;break end
+      end
+     end
+     if not better then guaranteed=false;break end
+    end
+    if not guaranteed then break end
+   end
+   if guaranteed then return item end
+  end
+ end
+end
 function P.Want(item,bag,player,wave)
  if P.Obsolete(item,bag,player,wave) then return false end
  local count=0
@@ -88,26 +122,36 @@ function P.Want(item,bag,player,wave)
 end
 function P.Priority(item,wave)
  local n=item.prefab
- if n=="spear" and wave==1 then return 1000 end
+ if Policy.TrapLoot(item,wave) then return -1000 end
+ local armor=P.Armor(item)
+ if n=="cane" then return 3000 end
+ if armor then return 2200+armor end
+ if n=="nightstick" then return 4000+P.Physical(item) end
+ if not tools[n] and not situational[n] and item.HasTag and item:HasTag("weapon") then return 4000+P.Physical(item) end
  if n=="boat_item" and wave==8 then return 1200 end
  if n=="oar_driftwood" and wave==8 then return 1100 end
- if n=="panflute" or n=="cane" then return 900 end
+ if n=="panflute" then return 900 end
  if n=="icestaff2" or n=="icestaff3" or n=="firestaff" then return 800 end
- if P.Armor(item) then return 600+P.Armor(item) end
  if P.Special(n,wave) then return 500 end
  if food[n] or Food.Known(n) then return 100+math.max(0,Food.Health(item)) end
  return 200
 end
 -- 背包满时只用更有价值且已存在于地面的物品置换，不清除未知玩家物品。
 function P.Discard(bag,player,wave,wanted)
- for _,item in ipairs(bag) do if P.Obsolete(item,bag,player,wave) then return item end end
+ for _,item in ipairs(bag) do if not P.Armor(item) and P.Obsolete(item,bag,player,wave) then return item end end
  if wanted and P.Weapon(wanted,player) then
   for _,item in ipairs(bag) do if P.Weapon(item,player) and P.Dominates(wanted,item) then return item end end
  end
- if wanted and P.Armor(wanted) then
-  for _,item in ipairs(bag) do if not P.Special(item.prefab,wave) and P.Armor(item) and
-   item.replica.equippable:EquipSlot()==wanted.replica.equippable:EquipSlot() and P.Armor(wanted)>P.Armor(item)
-   and P.Protection(wanted)>=P.Protection(item) and P.PlanarArmor(wanted)>=P.PlanarArmor(item) then return item end end
+ -- 仅在满包要拿装备时清理备用旧甲；已经穿上的替代甲必须真实确认，不能为地上新甲先脱掉旧甲。
+ if wanted and P.Priority(wanted,wave)>=2200 then
+  local inv=player.replica and player.replica.inventory
+  for _,item in ipairs(bag) do
+   if not P.Special(item.prefab,wave) and P.Armor(item) then
+    local slot=item.replica.equippable:EquipSlot()
+    local worn=inv and inv.GetEquippedItem and inv:GetEquippedItem(slot)
+    if worn and worn~=item and P.Armor(worn) and P.Obsolete(item,{item,worn},player,wave) then return item end
+   end
+  end
  end
  if wanted and P.Priority(wanted,wave)>=500 then
   local worst,score,count=nil,nil,0

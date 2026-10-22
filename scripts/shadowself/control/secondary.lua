@@ -49,6 +49,12 @@ function Secondary:Select(e)
     local c=self.c
     c.h.ent=e;c.target=e;c.bridge.wrappers.PreTheLoop.old(c.h)
 end
+-- 角斗场第三关的主教优先是持续输出目标；其他单位仅临时借作原生闪避目标。
+function Secondary:Preferred()
+ local c=self.c;local e=c.bridge.priority_target
+ if c.plan and c.plan.arena and e and (e.prefab=="bishop" or e.prefab=="bishop_nightmare")
+  and e:IsValid() and c.bridge.allowed(e) then return e end
+end
 function Secondary:Pulse()
     if self.c.queen_active and self.c.beequeen and self.c.beequeen.late then self.pending=nil;return end
     local c=self.c;local primary=c.h.ent
@@ -60,6 +66,8 @@ function Secondary:Pulse()
     local other=self:Danger(primary)
     if other then
         self:Select(other)
+    elseif self:Preferred() and not self.player:HasTag("attack") and not c.special_active then
+        local preferred=self:Preferred();if preferred~=primary then self:Select(preferred) end
     elseif c.h.selected_ents and not self.player:HasTag("attack") and not c.special_active and not c.bridge.priority_target then
         -- 每刀起手前重新选最近目标；挥刀中保留目标，避免改目标造成空刀。
         local nearest=require("shadowself/control/targetpolicy").Nearest(c.bridge)
@@ -131,6 +139,8 @@ function Secondary:Wrap(primary,data,checktab)
     return wrapped
 end
 function Secondary:AfterDodge(captured)
+ local preferred=self:Preferred()
+ if preferred then self:Select(preferred);return preferred end
  local c=self.c
  if c.queen_active or c.crabking and c.crabking:Active() or c.bridge.priority_target and c.bridge.allowed(c.bridge.priority_target) and not require("shadowself/control/targetpolicy").Rook(c.bridge.priority_target) then return captured end
  c.h:GetAttackTargets(24)
@@ -149,6 +159,12 @@ function Secondary:BeforeAttack(check_only)
     local danger=self:Danger(self.c.h.ent)
     if danger then
         if check_only then self.pending=danger else self:Select(danger) end
+        return false
+    end
+    local preferred=self:Preferred()
+    if preferred and preferred~=self.c.h.ent then
+        -- 当前威胁前摇由原生DoDodge走完，不能为回主教而取消闪避。
+        if not self.data[self.c.h.ent] then self:Select(preferred) end
         return false
     end
     if require("shadowself/control/incoming").ApproachBlocked(self.c,self.enemies,self.c.h.ent) then return false end

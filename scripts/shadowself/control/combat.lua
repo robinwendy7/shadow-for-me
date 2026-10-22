@@ -320,7 +320,7 @@ function Bridge:Coordinate(plan)
             end
             local argv={...}
             if name=="ShouldAtkWhenDodging" and not c.queen_active and not (c.crabking and c.crabking:Active()) then
-                local nearest=require("shadowself/control/targetpolicy").Nearest(self)
+                local nearest=c.secondary:Preferred() or require("shadowself/control/targetpolicy").Nearest(self)
                 if nearest and nearest~=victim then return false end
             end
             if name=="ShouldAtkWhenDodging" and argv[2] and argv[2].noattack then return false end

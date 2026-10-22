@@ -84,6 +84,9 @@ function Coordinator:Scan()
             local scale=e.Transform:GetScale();self.hazards[#self.hazards+1]={pos=e:GetPosition(),radius=(scale or 1)+.55,honey=true}
         end
     end
+    if self.plan and self.plan.arena then
+        for _,z in ipairs(require("shadowself/control/arena_fire").Zones(self.player,TheSim:FindEntities(pos.x,0,pos.z,16,nil,{"INLIMBO"}))) do self.hazards[#self.hazards+1]=z end
+    end
     if self.beequeen then
         for _,v in ipairs(self.beequeen.predicted or {}) do if now<v.untiltime then self.hazards[#self.hazards+1]=v end end
     end

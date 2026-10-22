@@ -41,6 +41,12 @@ p._shadowself_combat_buffs=nil;hound.tags.wet=nil
 c.enemies={hound,ent("hound"),ent("hound"),ent("hound"),ent("hound")};items={sword,star}
 assert(gear:Weapon()==sword,"five dry mobs never force morningstar")
 items={sword,whip,star};assert(gear:Weapon()==whip,"ordinary mob crowd still uses whip")
+c.plan={arena=true,arena_no_whip=function() return true end}
+assert(gear:Weapon()==sword,"arena trap guards prohibit whip despite crowd range bonus")
+gear.forced_weapon=whip;assert(gear:Weapon()==sword,"forced whip cannot bypass trap prohibition");gear.forced_weapon=nil
+c.plan.arena_no_whip=function() return false end
+assert(gear:Weapon()==whip,"whip available again when trap guards removed")
+c.plan=nil
 local boss=ent("antlion");boss.tags.epic=true;c.target=boss
 assert(gear:Weapon()==sword,"boss target ignores crowd range preference")
 c.target=hound;c.enemies={hound,ent("sandspike_tall"),ent("sandspike_med"),ent("sandspike_short"),ent("sandblock"),ent("crabking_icewall")}

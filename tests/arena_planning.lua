@@ -29,6 +29,21 @@ local fresh=item('nightsword',EQUIPSLOTS.HANDS,100);fresh.tags.weapon=true
 local old=item('nightsword',EQUIPSLOTS.HANDS,10);old.tags.weapon=true
 local star=item('nightstick',EQUIPSLOTS.HANDS);star.tags.weapon=true
 local cane=item('cane',EQUIPSLOTS.HANDS);cane.tags.weapon=true
+assert(Inventory.ForecastDiscard({spear},p,2,'default')==spear,'wave2 intermission discards spear for guaranteed wave3 tentacle spike')
+assert(not Inventory.ForecastDiscard({spike},p,3,'default'),'10 percent night sword cannot justify dropping current spike')
+assert(Inventory.ForecastDiscard({spike},p,4,'default')==spike,'guaranteed fresh ham bat replaces spike before wave5')
+assert(not Inventory.ForecastDiscard({star,cane},p,6,'default'),'morningstar and cane preserved despite guaranteed ruins bat')
+assert(not Inventory.ForecastDiscard({sword},p,6,'default'),'lower damage next weapon cannot displace current sword')
+assert(not Inventory.ForecastDiscard({sword},p,15,'default'),'last wave has no forecast equipment')
+local planar=item('sword_lunarplant',EQUIPSLOTS.HANDS);planar.tags.weapon=true
+assert(not Inventory.ForecastDiscard({planar},p,6,'default'),'higher physical damage does not discard planar weapon')
+local wood=item('armorwood',EQUIPSLOTS.BODY)
+for _,gear in ipairs({wood,spear,star,spike}) do
+ for _,supply in ipairs({item('panflute'),item('waffles'),item('icestaff3')}) do
+  assert(Inventory.Priority(gear,3)>Inventory.Priority(supply,3),'armor and melee weapons precede tools and food')
+ end
+end
+assert(Inventory.Priority(item('firestaff'),2)<Inventory.Priority(item('waffles'),2),'trap staff remains last')
 assert(Inventory.Obsolete(spear,{spear,spike},p,3))
 assert(Inventory.Obsolete(spike,{spike,sword},p,4))
 local hambat=item('hambat',EQUIPSLOTS.HANDS);hambat.tags.weapon=true
@@ -42,6 +57,11 @@ assert(Inventory.Discard({spear},p,3,sword)==spear,'full bag can exchange low da
 assert(not Inventory.Discard({sword},p,3,spear),'never discard strong weapon for weaker floor drop')
 local armor=item('armorruins',EQUIPSLOTS.BODY);local grass=item('armorgrass',EQUIPSLOTS.BODY)
 assert(Inventory.Want(armor,{grass},p,10) and Inventory.Obsolete(grass,{grass,armor},p,10))
+assert(not Inventory.Discard({grass,armor},p,10),'spare armor not pruned with free bag space')
+assert(not Inventory.Discard({grass},p,10,armor),'never discard worn/only armor before floor upgrade is acquired')
+assert(Inventory.Priority(spike,3)>Inventory.Priority(cane,3) and Inventory.Priority(cane,3)>Inventory.Priority(armor,3),'weapons then cane then armor')
+assert(Inventory.Priority(armor,3)>Inventory.Priority(item('rainhat',EQUIPSLOTS.HEAD),3),'rainhat is utility, not protective helmet')
+assert(not Inventory.Armor(item('rainhat',EQUIPSLOTS.HEAD)))
 local marble=item('armormarble',EQUIPSLOTS.BODY);local wood=item('armorwood',EQUIPSLOTS.BODY)
 assert(Inventory.Want(marble,{wood},p,4),'high absorption armor is not discarded merely because mobile armor has higher equip score')
 local planar=item('armor_lunarplant',EQUIPSLOTS.BODY)
