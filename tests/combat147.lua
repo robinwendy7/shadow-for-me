@@ -48,7 +48,7 @@ KillThreadsWithID=oldKill
 local far,near=ent('hound',8,0),ent('spider',2,0);p.pos=Vector3(0,0,0)
 local c={player=p,h={ent=far,GetAttackTargets=function() end},special_active=true}
 c.bridge={player=p,h=c.h,allowed=function() return true end,wrappers={PreTheLoop={old=function() end}}};c.h.selected_ents={[far]=true,[near]=true}
-local Secondary=require('shadowself/control/secondary');local s=Secondary(c)
+local Secondary=require('shadowself/control/secondary');local s=Secondary(c);s.Scan=function() end;s.Danger=function() return nil end
 assert(s:AfterDodge(far)==near and c.h.ent==near,'nearest enemy wins after completed dodge even with stale special flag')
 c.special_active=false;c.h.ent=far;s.data={};s.Scan=function() end;s.Danger=function() end
 p.tags.attack=true;s:Pulse();assert(c.h.ent==far,'do not change target midway through a swing')

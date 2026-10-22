@@ -33,16 +33,17 @@ package.loaded['shadowself/control/arena_opening']=nil
 local arena={player=p,wave=3,bridge={},StopCombat=function() stops=stops+1 end}
 local opening=require('shadowself/control/arena_opening')(arena);opening:Reset()
 assert(not opening:Tick({}) and plays==0,'wait for actual monster spawn rather than wave number alone')
-local bishop=entity('bishop',6,0);local knight=entity('knight',2,0)
-assert(opening:Tick({knight,bishop}) and plays==1 and arena.bridge.priority_target==bishop,'spawn starts single flute and bishop priority')
-now=.4;opening:Tick({knight,bishop});assert(plays==1,'pending play does not resend')
-bishop.tags.sleeping=true;busy=true;now=1.1
-assert(opening:Tick({knight,bishop}),'sleep acknowledgement must not cancel remaining instrument action')
-now=2;busy=false;assert(not opening:Tick({knight,bishop}) and opening.done)
-now=3;assert(not opening:Tick({knight,bishop}) and plays==1,'only one successful opener in this wave')
+local bishop=entity('bishop',6,0);local knight=entity('knight',2,0);local rook=entity('rook',-4,0)
+assert(opening:Tick({knight,bishop,rook}) and plays==1 and arena.bridge.priority_target==bishop,'spawn starts single flute and bishop priority')
+now=.4;opening:Tick({knight,bishop,rook});assert(plays==1,'pending play does not resend')
+bishop.tags.sleeping=true;knight.tags.sleeping=true;rook.tags.sleeping=true;busy=true;now=1.1
+assert(opening:Tick({knight,bishop,rook}),'sleep acknowledgement must not cancel remaining instrument action')
+now=2;busy=false;assert(not opening:Tick({knight,bishop,rook}) and opening.done)
+now=3;assert(not opening:Tick({knight,bishop,rook}) and plays==1,'only one successful opener in this wave')
 assert(not opening:Tick({knight}) and not arena.bridge.priority_target,'bishop death releases ordinary target selection')
 arena.wave=2;opening:Reset();assert(not opening:Tick({bishop}) and plays==1,'other waves do not play opener')
 arena.wave=3;items={};assert(not opening:Tick({bishop}) and opening.done,'missing flute does not stall combat forever')
+knight.tags.sleeping=nil;rook.tags.sleeping=nil
 -- 执行真实Secondary路径：骑士临时接管躲避后，恢复主教而不是原样返回骑士。
 local c={player=p,plan={arena=true},h={ent=knight,selected_ents={[knight]=true,[bishop]=true}},enemies={},hazards={}}
 c.bridge={priority_target=bishop,allowed=function(e) return e:IsValid() and not e:HasTag('dead') end,

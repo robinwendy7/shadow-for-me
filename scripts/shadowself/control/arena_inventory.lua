@@ -3,7 +3,7 @@ local Policy=require("shadowself/control/arena_policy")
 local Damage=require("shadowself/control/weapon_damage")
 local Food=require("shadowself/control/arena_food")
 local P={}
-local tools={cane=true,nightstick=true,panflute=true,firestaff=true,icestaff=true,icestaff2=true,icestaff3=true,
+local tools={staff_tornado=true,cane=true,nightstick=true,panflute=true,firestaff=true,icestaff=true,icestaff2=true,icestaff3=true,
  orangestaff=true,armorsnurtleshell=true,armorskeleton=true,nightmarefuel=true,yellowamulet=true,
  rainhat=true,eyebrellahat=true,lunarplant_kit=true,voidcloth_kit=true}
 local situational={batbat=true,torch=true}
@@ -18,7 +18,7 @@ function P.Condition(item)
  return 1
 end
 function P.Weapon(item,player)
- if not Policy.known[item.prefab] or tools[item.prefab] or situational[item.prefab] then return false end
+ if item.prefab=="boomerang" or not Policy.known[item.prefab] or tools[item.prefab] or situational[item.prefab] then return false end
  require("shadowself/legacy/combat_equipment")
  return require("shadowself/legacy/registry").Equipment.Weapon(player,item)
 end
@@ -32,6 +32,8 @@ function P.Dominates(a,b)
  return ap>=bp and ad>=bd and (ap>bp or ad>bd or P.Condition(a)>P.Condition(b)+.05)
 end
 function P.Special(name,wave)
+ if name=="staff_tornado" then return true end
+ if name=="rainhat" then return wave<=6 end
  if tools[name] then return true end
  if name=="boat_item" or name=="boat_grass_item" or name=="oar_driftwood" then return wave<=8 end
  if name=="torch" then return wave<10 end
@@ -44,6 +46,7 @@ function P.Armor(item)
  return eq and eq:EquipSlot()~=EQUIPSLOTS.HANDS and Policy.ArmorScore(item,eq:EquipSlot(),{}) or nil
 end
 function P.Protection(item)
+ if item.prefab=="armorskeleton" then return 1 end
  local armor=item.components and item.components.armor
  if armor and type(armor.absorb_percent)=="number" then return armor.absorb_percent end
  return ({armorgrass=.6,armorwood=.8,armormarble=.95,armordragonfly=.7,armorruins=.9,armordreadstone=.9,
@@ -56,6 +59,13 @@ function P.PlanarArmor(item)
  return ({armor_lunarplant=10,armor_voidcloth=10,lunarplanthat=10,voidclothhat=10,armorwagpunk=15})[item.prefab] or 0
 end
 function P.Obsolete(item,bag,player,wave)
+ if P.BelowArmorFloor(item,wave) then return true end
+ if item.prefab=="rainhat" and wave>6 or item.prefab=="torch" and wave>=8 then return true end
+ if item.prefab=="hambat" then
+  for _,other in ipairs(bag) do if other.prefab=="ruins_bat" and P.Condition(other)>0 then return true end end
+ end
+ -- 回旋镖不参与角斗场拾取或常规武器比较，已有的允许清理。
+ if item.prefab=="boomerang" then return true end
  if not Policy.known[item.prefab] or P.Special(item.prefab,wave) then return false end
  if item.prefab=="boat_item" or item.prefab=="boat_grass_item" or item.prefab=="oar_driftwood" then return wave>8 end
  if P.Weapon(item,player) then
@@ -72,7 +82,7 @@ function P.Obsolete(item,bag,player,wave)
   end
  end
  -- 过时的投掷武器/旋风工具不挤占后段装备位。
- if item.prefab=="boomerang" and wave>=3 or item.prefab=="staff_tornado" and wave>=7 or item.prefab=="torch" and wave>=10 then return true end
+ if item.prefab=="torch" and wave>=10 then return true end
  return false
 end
 -- 仅预测确定会刷新的常规近战武器；概率掉落和特殊用途装备不提前淘汰。
@@ -111,6 +121,15 @@ function P.ForecastDiscard(bag,player,wave,route)
 end
 function P.Want(item,bag,player,wave)
  if P.Obsolete(item,bag,player,wave) then return false end
+ if P.IsFood(item) then
+  local count=0
+  for _,other in ipairs(bag) do if P.IsFood(other) then
+   count=count+1
+   local stack=other.replica and other.replica.stackable
+   if other.prefab==item.prefab and stack and not stack:IsFull() then return true end
+  end end
+  if count>=2 then return false end
+ end
  local count=0
  for _,other in ipairs(bag) do if other.prefab==item.prefab then
   count=count+1
@@ -122,6 +141,8 @@ function P.Want(item,bag,player,wave)
 end
 function P.Priority(item,wave)
  local n=item.prefab
+ if wave==8 and (n=="boat_item" or n=="boat_grass_item") then return 10000 end
+ if wave==8 and (n=="oar_driftwood" or item:HasTag("oar")) then return 9900 end
  if Policy.TrapLoot(item,wave) then return -1000 end
  local armor=P.Armor(item)
  if n=="cane" then return 3000 end
@@ -136,8 +157,40 @@ function P.Priority(item,wave)
  if food[n] or Food.Known(n) then return 100+math.max(0,Food.Health(item)) end
  return 200
 end
+function P.IsFood(item)
+ return food[item.prefab]~=nil or Food.Known(item.prefab) or Food.Recipe(item)~=nil
+end
+local function foodscore(item,player)
+ return math.max(0,Food.Health(item,player))+(item.prefab:find("voltgoatjelly",1,true) and 100 or 0)
+end
+-- 第七关休整开始主动腾位；只清理已知过时物品，不提前扔掉唯一护甲。
+function P.BelowArmorFloor(item,wave)
+ if not P.Armor(item) then return false end
+ local floor=wave>=11 and .9 or wave>=8 and .8 or 0
+ return P.Protection(item)+.0001<floor
+end
+function P.Cleanup(bag,player,wave,cleared)
+ if not (wave>=8 or wave==7 and cleared) then return nil end
+ local nextphase=(wave==7 or wave==10) and cleared and wave+1 or wave
+ local foods={}
+ for _,item in ipairs(bag) do
+  local eq=item.replica and item.replica.equippable
+  local worn=P.Armor(item) and eq and player.replica.inventory:GetEquippedItem(eq:EquipSlot())==item
+  if P.BelowArmorFloor(item,nextphase) or not worn and P.Obsolete(item,bag,player,nextphase) then return item end
+  if P.IsFood(item) then foods[#foods+1]=item end
+ end
+ if #foods>2 then
+  table.sort(foods,function(a,b)
+   local av,bv=foodscore(a,player),foodscore(b,player)
+   if av~=bv then return av>bv end
+   return (a.GUID or 0)<(b.GUID or 0)
+  end)
+  return foods[#foods]
+ end
+end
 -- 背包满时只用更有价值且已存在于地面的物品置换，不清除未知玩家物品。
 function P.Discard(bag,player,wave,wanted)
+ local cleanup=P.Cleanup(bag,player,wave,false);if cleanup then return cleanup end
  for _,item in ipairs(bag) do if not P.Armor(item) and P.Obsolete(item,bag,player,wave) then return item end end
  if wanted and P.Weapon(wanted,player) then
   for _,item in ipairs(bag) do if P.Weapon(item,player) and P.Dominates(wanted,item) then return item end end

@@ -193,6 +193,9 @@ function Takeover:Frame(dt)
     return true
 end
 function Takeover:Stop(message,silent)
+    if self.task and self.task.kind=="arena" then
+        print("[ShadowSelf][arena_stop] reason="..tostring(message or "manual_or_unspecified"))
+    end
     if self.r.speech then self.r.speech:ClearPin() end
     self:EndBattle()
     local acted=self.phase~=nil

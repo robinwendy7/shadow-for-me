@@ -4,6 +4,9 @@ local safe={campfire=true,firepit=true,coldfire=true,coldfirepit=true,torch=true
 function F.Zone(e,player)
  if not e:IsValid() then return end
  local name=e.prefab
+ if require("shadowself/control/arena_snails").Burning(e) then
+  return {pos=e:GetPosition(),radius=3+(player.GetPhysicsRadius and player:GetPhysicsRadius(0) or .5)+1,source=e,explosive_snail=true}
+ end
  if name~="houndfire" and name~="fire" then return end
  local owner=e.entity and e.entity.GetParent and e.entity:GetParent()
  if owner and (owner==player or safe[owner.prefab] or owner:HasTag("player")
@@ -17,6 +20,16 @@ function F.Zones(player,entities)
  local out={}
  for _,e in ipairs(entities) do local z=F.Zone(e,player);if z then out[#out+1]=z end end
  return out
+end
+-- 原版spiderhole的GroundCreepEntity半径为5，额外留人物碰撞余量。
+function F.WebZones(player,entities)
+ local zones={}
+ for _,e in ipairs(entities) do
+  if e:IsValid() and (e.prefab=="spiderhole" or e.prefab=="spiderhole_rock") then
+   zones[#zones+1]={pos=e:GetPosition(),radius=5+(player.GetPhysicsRadius and player:GetPhysicsRadius(0) or .5)+.5,source=e,web=true}
+  end
+ end
+ return zones
 end
 function F.Safe(player,point,zones)
  local p=player:GetPosition();local steps=math.max(2,math.ceil(math.sqrt(p:DistSq(point))/.5))

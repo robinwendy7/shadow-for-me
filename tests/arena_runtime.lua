@@ -46,7 +46,8 @@ now=.24;task:Tick();assert(starts==1 and stops==0,'fresh near spawn merged into 
 spawned.dead=true;now=.25;task:Tick();assert(not active and stops==1,'dead body with delayed replica health cannot retain combat forever')
 -- 场景冰火杖必须在清怪后且所有普通补给之后拾取。
 local Policy=require('shadowself/control/arena_policy')
-local actions=package.loaded['shadowself/control/actions'];local picked
+local actions=package.loaded['shadowself/control/actions'];local picked,guard;local cancelled=0
+actions.Stop=function() cancelled=cancelled+1 end
 local function drop(name,guid)
  local e={prefab=name,GUID=guid,replica={inventoryitem={IsHeld=function() return false end}}}
  function e:IsValid() return true end
@@ -65,19 +66,32 @@ function alive:HasTag() return false end
 function alive:GetPosition() return Vector3(40,0,0) end
 local scene={fire,ice,sleeping};local owned={}
 actions.Items=function() return owned end
-actions.Scene=function(_,item) picked=item;return true end
+actions.Scene=function(_,item,_,check) if check and not check() then return false end;picked=item;guard=check;return true end
 TheSim.FindEntities=function() return scene end
 for _,wave in ipairs({2,3}) do
+ snapshot.wave=wave;snapshot.intermission=false
  task.wave=wave;task.pending_item=nil;task.ignored={};task.next_item=nil;task.raw_entities=nil;now=now+1;picked=nil
  assert(Inventory.Priority(fire,wave)<Inventory.Priority(food,wave))
  local hostiles=task:Entities();assert(#hostiles==0,'dormant scene guards do not prevent post-clear pickup')
  assert(not task:Loot({fire,ice},false) and not picked,'precombat cannot pick either trap staff')
  assert(task:Loot({fire,food,ice},true) and picked==food,'ordinary supplies beat both trap staffs even with unsorted input')
  task.pending_item=nil;task.next_item=nil;picked=nil
+ assert(not task:Loot({fire,ice},true) and not picked,'empty local scan during active/preparing wave must not release trap staff')
+ snapshot.intermission=true
  scene={fire,ice,sleeping,alive}
  assert(not task:Loot({fire,ice},true) and not picked,'fresh 60-range scan blocks stale clear flag for distant live enemy')
  scene={fire,ice,sleeping};task.next_item=nil
  assert(task:Loot({fire,ice},true) and picked==fire,'clear wave permits first trap pickup')
+ assert(guard and guard(),'trap action has final send-time validation')
+ local delayed=guard;snapshot.intermission=false;picked=nil
+ assert(not delayed(),'server returns to combat before action RPC: reject delayed pickup')
+ local before=cancelled
+ assert(not task:Loot({fire,ice},true) and not picked and not task.pending_item and cancelled==before+1,'cancel walking to trap when server clearance is lost')
+ snapshot.intermission=true;task.next_item=nil
+ assert(task:Loot({fire,ice},true) and picked==fire)
+ local previous=guard;snapshot.wave=wave+1
+ assert(not previous(),'stale previous-wave trap request cannot send')
+ snapshot.wave=wave
  owned={fire};task.next_item=nil;picked=nil
  assert(task:Loot({ice},true) and picked==ice,'confirmed first pickup permits second staff')
  owned={};task.pending_item=nil;task.next_item=nil;sleeping.asleep=false;picked=nil

@@ -13,10 +13,41 @@ local function unit(a,b,d)
  if n<.01 then x,z,n=1,0,1 end
  return Vector3(a.x+x/n*d,0,a.z+z/n*d)
 end
-function S:Reset() self.crab=nil;self.center=nil;self.boat=nil;self.deploy=nil;self.ice=nil;self.retreat=nil;self.worm_target=nil;self.add_target=nil;self.lure=nil;self.next_move=nil;self.last_goal=nil;self.next_equip=nil;self.next_row=nil;self.wait_scene=nil;self.wait_water=nil end
+function S:Reset() self.crab=nil;self.center=nil;self.boat=nil;self.deploy=nil;self.ice=nil;self.retreat=nil;self.worm_target=nil;self.add_target=nil;self.lure=nil;self.next_move=nil;self.last_goal=nil;self.next_equip=nil;self.next_row=nil;self.wait_scene=nil;self.wait_water=nil;self.wait_oar=nil end
+-- 识别角斗场有限水域，不把普通开放海洋当成场地中心。
+function S:WaterCenter()
+ local map=TheWorld.Map;local p=self.player:GetPosition()
+ if not map.GetTileCenterPoint then return end
+ local cx,_,cz=map:GetTileCenterPoint(p.x,0,p.z);if not cx then return end
+ local seed,dist
+ for x=cx-40,cx+40,4 do for z=cz-40,cz+40,4 do
+  if map:IsOceanAtPoint(x,0,z) then local d=(x-p.x)^2+(z-p.z)^2
+   if not dist or d<dist then seed,dist={x=x,z=z},d end
+  end
+ end end
+ if not seed then return end
+ local queue={seed};local seen={};local head=1;local count=0;local minx,maxx,minz,maxz
+ while head<=#queue do
+  local q=queue[head];head=head+1;local key=q.x..":"..q.z
+  if not seen[key] then
+   seen[key]=true
+   if map:IsOceanAtPoint(q.x,0,q.z) then
+    count=count+1;if count>144 or math.abs(q.x-cx)>44 or math.abs(q.z-cz)>44 then return end
+    minx=math.min(minx or q.x,q.x);maxx=math.max(maxx or q.x,q.x);minz=math.min(minz or q.z,q.z);maxz=math.max(maxz or q.z,q.z)
+    for _,d in ipairs({{4,0},{-4,0},{0,4},{0,-4}}) do queue[#queue+1]={x=q.x+d[1],z=q.z+d[2]} end
+   end
+  end
+ end
+ if count>=16 and maxx-minx>=12 and maxz-minz>=12 and maxx-minx<=40 and maxz-minz<=40 then
+  return Vector3((minx+maxx)/2,0,(minz+maxz)/2)
+ end
+end
 function S:FindCenter()
  if self.center then return self.center end
+ if GetTime()<(self.next_center or 0) then return nil end
+ self.next_center=GetTime()+.5
  local p=self.player:GetPosition();local map=TheWorld.Map;local tile=WORLD_TILES and WORLD_TILES.COTL_BRICK
+ self.center=self:WaterCenter();if self.center then return self.center end
  if not tile or not map.GetTileAtPoint or not map.GetTileCenterPoint then return nil end
  local minx,maxx,minz,maxz;local hits=0
  local cx,_,cz=map:GetTileCenterPoint(p.x,0,p.z)
@@ -63,7 +94,18 @@ end
 function S:Row(boat,goal,retreat)
  local oar
  for _,item in ipairs(A.Items(self.player)) do if item.prefab=="oar_driftwood" or item:HasTag("oar") then oar=item;break end end
- if not oar then return "failed","帝王蟹关缺少船桨，无法划向场地中央。" end
+ if not oar then
+  self.arena:StopCombat()
+  local oars={}
+  for _,item in ipairs(self.arena.items or {}) do
+   if item.prefab=="oar_driftwood" or item:HasTag("oar") then oars[#oars+1]=item end
+  end
+  if self.arena:Loot(oars) then self.wait_oar=nil;return "hold" end
+  self.wait_oar=self.wait_oar or GetTime()
+  if GetTime()-self.wait_oar<8 then self.arena:Say("帝王蟹 · 等待并拾取船桨");return "hold" end
+  self.arena:Say("帝王蟹 · 等待船桨同步，不结束循环");return "hold"
+ end
+ self.wait_oar=nil
  if not self:Equip(oar) then return "hold" end
  self.arena:StopCombat()
  local p=self.player:GetPosition();local bp=boat:GetPosition();local aim=unit(bp,goal,12)
@@ -89,7 +131,7 @@ function S:Crab(entities)
  if not center then
   self.arena:StopCombat();self.wait_scene=self.wait_scene or GetTime()
   if GetTime()-self.wait_scene<8 then self.arena:Say("帝王蟹 · 等待场地地形同步");return "hold" end
-  return "failed","未识别到帝王蟹场地中心，停止自动下海。"
+  self.arena:Say("帝王蟹 · 等待有限水域中心同步，不等待Boss生成");return "hold"
  end
  if self.crab and not alive(self.crab) then self.retreat=true end
  local inice=alive(king) and king:HasTag("icewall")
@@ -151,14 +193,20 @@ function S:Crab(entities)
   end
   if self.deploy then
    if GetTime()<self.deploy.deadline then self.arena:StopCombat();return "hold" end
-   return "failed","放船后未收到船实体确认；服务器可能禁止DEPLOY，已停止下海流程。"
+   self.deploy=nil;self.arena:Say("帝王蟹 · 船实体确认延迟，重新核对船套与附近船只");return "hold"
   end
   local kit
   for _,item in ipairs(A.Items(self.player)) do
    if item.prefab=="boat_item" then kit=item;break elseif item.prefab=="boat_grass_item" then kit=item end
   end
   if not kit then
-   if self.arena:Loot(self.arena.items or {}) then return "hold" end
+   -- 缺船时只拿船套，不能被普通补给和满包循环挡住。
+   if self.arena:Prune() then return "hold" end
+   local kits={}
+   for _,item in ipairs(self.arena.items or {}) do
+    if item.prefab=="boat_item" or item.prefab=="boat_grass_item" then kits[#kits+1]=item end
+   end
+   if self.arena:Loot(kits) then return "hold" end
    self.arena:Say("帝王蟹 · 等待船套同步并拾取")
    return "hold"
   end
@@ -174,7 +222,17 @@ function S:Crab(entities)
   if not point then
    self.wait_water=self.wait_water or GetTime()
    if GetTime()-self.wait_water<8 then self.arena:StopCombat();self.arena:Say("帝王蟹 · 等待水面及放船位置同步");return "hold" end
-   return "failed","附近没有可放船水面，停止下海以免落水。"
+   local shore,score
+   for d=4,28,4 do for i=0,31 do local a=i*math.pi/16
+    local q=Vector3(p.x+math.cos(a)*d,0,p.z+math.sin(a)*d)
+    local water=unit(q,center,4)
+    if TheWorld.Map:IsPassableAtPoint(q.x,0,q.z) and not TheWorld.Map:IsOceanAtPoint(q.x,0,q.z)
+     and TheWorld.Map:IsOceanAtPoint(water.x,0,water.z) and ii:CanDeploy(water,nil,self.player,0) then
+     local value=p:DistSq(q);if not score or value<score then shore,score=q,value end
+    end
+   end end
+   if shore then return self:Move(shore,"帝王蟹 · 靠近水边放船") end
+   self.arena:StopCombat();self.arena:Say("帝王蟹 · 等待可部署的水边位置同步");return "hold"
   end
   self.wait_water=nil
   self.arena:StopCombat()

@@ -38,6 +38,7 @@ local hound=ent("hound");c.target=hound;c.enemies={hound};items={sword,star}
 hound.tags.wet=true;assert(gear:Weapon()==star,"wet target without electric buff selects morningstar")
 p._shadowself_combat_buffs={electric_until=100};assert(gear:Weapon()==sword,"active electric buff excludes redundant morningstar")
 p._shadowself_combat_buffs=nil;hound.tags.wet=nil
+items={weapon("spear"),star};assert(gear:Weapon().prefab=="spear","dry target never selects stronger morningstar over ordinary spear")
 c.enemies={hound,ent("hound"),ent("hound"),ent("hound"),ent("hound")};items={sword,star}
 assert(gear:Weapon()==sword,"five dry mobs never force morningstar")
 items={sword,whip,star};assert(gear:Weapon()==whip,"ordinary mob crowd still uses whip")

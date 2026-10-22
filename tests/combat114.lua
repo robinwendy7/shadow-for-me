@@ -32,6 +32,15 @@ local Enc=require("shadowself/control/encounters");local e=Enc(c);c.encounters=e
 local walrus=entity("walrus",10,0);local dog=entity("icehound",2,0)
 c.enemies={walrus,dog};local mode,target=e:Tick(walrus)
 assert(mode=="attack" and target==dog and bridge.priority_target==dog,"ice dogs are killed before walrus manoeuvre")
+-- 复现服务器第二关：威胁列表仍含陷阱冰狗，但攻击过滤拒绝它。
+dog.tags.aggro=false;dog.anim="sleep_loop";dog.tags.sleeping=true
+for i=1,12 do
+ mode,target=e:Tick(walrus)
+ assert(mode=="move" and target==walrus and bridge.priority_target==walrus and not e.allowed[dog],"sleeping forbidden ice dog cannot pin walrus tactics or suppress movement")
+end
+dog.tags.aggro=true;dog.tags.sleeping=nil;dog.anim="run_loop"
+mode,target=e:Tick(walrus)
+assert(mode=="attack" and target==dog,"awakened permitted ice dog resumes priority")
 dog.tags.isdead=true;c.enemies={walrus};now=1;mode,target=e:Tick(walrus)
 assert(mode=="move" and c.moved.x<0 and pauses>0,"walrus retreat physically stops attacks before moving outside darts")
 p.pos=Vector3(42,0,0);now=2;walrus.anim="idle_happy";mode=e:Tick(walrus)

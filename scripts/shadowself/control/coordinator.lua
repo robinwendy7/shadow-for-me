@@ -77,7 +77,7 @@ function Coordinator:Scan()
     local now=GetTime()
     if now<(self.next_scan or 0) then return end
     self.next_scan=now+.05;self.enemies={};self.observed={}
-    local pos=self.player:GetPosition()
+    local pos=self.player:GetPosition();local scanrange=self.plan and self.plan.arena and 30 or 24
     self.hazards={}
     for _,e in ipairs(TheSim:FindEntities(pos.x,pos.y,pos.z,24)) do
         if e.prefab=="honey_trail" and e:IsValid() and not (e._isfading and e._isfading:value()) then
@@ -87,13 +87,16 @@ function Coordinator:Scan()
     if self.plan and self.plan.arena then
         for _,z in ipairs(require("shadowself/control/arena_fire").Zones(self.player,TheSim:FindEntities(pos.x,0,pos.z,16,nil,{"INLIMBO"}))) do self.hazards[#self.hazards+1]=z end
     end
+    if self.plan and self.plan.arena and self.plan.arena_wave and self.plan.arena_wave()==2 then
+        for _,zone in ipairs(require("shadowself/control/arena_fire").WebZones(self.player,TheSim:FindEntities(pos.x,0,pos.z,30,nil,{"INLIMBO"}))) do self.hazards[#self.hazards+1]=zone end
+    end
     if self.beequeen then
         for _,v in ipairs(self.beequeen.predicted or {}) do if now<v.untiltime then self.hazards[#self.hazards+1]=v end end
     end
     local s=self.owner.perception.Scan and self.owner.perception:Scan(false) or nil
     self.snapshot=s or {night=TheWorld.state.isnight}
     local rawpre=self.bridge.wrappers.IsAttackPre and self.bridge.wrappers.IsAttackPre.old or self.h.IsAttackPre
-    for _,e in ipairs(TheSim:FindEntities(pos.x,pos.y,pos.z,24,nil,{"INLIMBO","FX","DECOR","isdead"})) do
+    for _,e in ipairs(TheSim:FindEntities(pos.x,pos.y,pos.z,scanrange,nil,{"INLIMBO","FX","DECOR","isdead"})) do
         local ec=e.replica and e.replica.combat
         local ally=self.player.replica.combat and self.player.replica.combat.IsAlly and self.player.replica.combat:IsAlly(e)
         local threat=ec and not ally and not e:HasTag("player") and not e:HasTag("isdead")

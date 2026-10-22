@@ -23,6 +23,11 @@ function p:GetCurrentPlatform() return self.platform end
 p.replica.inventory={GetEquippedItem=function(_,slot) return slot==EQUIPSLOTS.HANDS and hand end,GetItems=function() return bag end,GetEquips=function() return hand and {hand} or {} end,GetOverflowContainer=function() end}
 p.components.playercontroller={IsBusy=function() return false end}
 local spear=item('spear',EQUIPSLOTS.HANDS);spear.tags.weapon=true
+local boomerang=item('boomerang',EQUIPSLOTS.HANDS);boomerang.tags.weapon=true
+for wave=1,15 do
+ assert(not Inventory.Want(boomerang,{},p,wave) and not Inventory.Want(boomerang,{spear},p,wave),'never pick boomerang, even with empty inventory')
+ assert(not Inventory.Weapon(boomerang,p) and Inventory.Obsolete(boomerang,{boomerang},p,wave),'boomerang does not replace melee weapons and can be discarded')
+end
 local spike=item('tentaclespike',EQUIPSLOTS.HANDS);spike.tags.weapon=true
 local sword=item('nightsword',EQUIPSLOTS.HANDS);sword.tags.weapon=true
 local fresh=item('nightsword',EQUIPSLOTS.HANDS,100);fresh.tags.weapon=true
@@ -57,15 +62,16 @@ assert(Inventory.Discard({spear},p,3,sword)==spear,'full bag can exchange low da
 assert(not Inventory.Discard({sword},p,3,spear),'never discard strong weapon for weaker floor drop')
 local armor=item('armorruins',EQUIPSLOTS.BODY);local grass=item('armorgrass',EQUIPSLOTS.BODY)
 assert(Inventory.Want(armor,{grass},p,10) and Inventory.Obsolete(grass,{grass,armor},p,10))
-assert(not Inventory.Discard({grass,armor},p,10),'spare armor not pruned with free bag space')
-assert(not Inventory.Discard({grass},p,10,armor),'never discard worn/only armor before floor upgrade is acquired')
+assert(not Inventory.Discard({grass,armor},p,6),'before ocean preparation spare armor is retained with free bag space')
+assert(Inventory.Discard({grass,armor},p,10)==grass,'ocean preparation clears obsolete spare grass armor when stronger armor is owned')
+assert(not Inventory.Discard({grass},p,6,armor),'never discard worn/only armor before floor upgrade is acquired')
 assert(Inventory.Priority(spike,3)>Inventory.Priority(cane,3) and Inventory.Priority(cane,3)>Inventory.Priority(armor,3),'weapons then cane then armor')
 assert(Inventory.Priority(armor,3)>Inventory.Priority(item('rainhat',EQUIPSLOTS.HEAD),3),'rainhat is utility, not protective helmet')
 assert(not Inventory.Armor(item('rainhat',EQUIPSLOTS.HEAD)))
 local marble=item('armormarble',EQUIPSLOTS.BODY);local wood=item('armorwood',EQUIPSLOTS.BODY)
 assert(Inventory.Want(marble,{wood},p,4),'high absorption armor is not discarded merely because mobile armor has higher equip score')
 local planar=item('armor_lunarplant',EQUIPSLOTS.BODY)
-assert(not Inventory.Obsolete(planar,{planar,armor},p,13),'ordinary armor cannot replace planar defense reserve')
+assert(not Inventory.Obsolete(planar,{planar,armor},p,10),'ordinary armor cannot replace planar defense reserve')
 assert(Inventory.Special('icestaff2',12) and Inventory.Special('nightstick',15))
 local boatkit=item('boat_item');assert(Inventory.Obsolete(boatkit,{},p,9),'used ocean equipment expires after wave8')
 local food=item('meatballs');local flute=item('panflute')
@@ -83,11 +89,20 @@ package.loaded['shadowself/control/actions']={Items=function() return bag end,
 package.loaded['shadowself/control/arena_encounters']=nil
 local E=require('shadowself/control/arena_encounters')
 local arena={player=p,wave=8,items={},bridge={},Inventory=function() return {},bag end,
- StopCombat=function() stops=stops+1 end,Say=function() end,Loot=function() loots=loots+1;return false end}
+ Prune=function() return false end,StopCombat=function() stops=stops+1 end,Say=function() end,Loot=function() loots=loots+1;return false end}
 TheWorld={Map={IsOceanAtPoint=function() return true end,IsPassableAtPoint=function() return true end,GetTileAtPoint=function() return 9 end,GetPlatformAtPoint=function() return nil end}}
-local s=E(arena);s.center=Vector3(0,0,0);bag={boatkit};assert(s:Crab({})=='hold' and deploys==1)
+local s=E(arena);s.center=Vector3(0,0,0)
+arena.items={food,boatkit,oar};bag={};local cleaned=false
+arena.Prune=function() cleaned=true;return true end
+local beforeLoot=loots
+assert(s:Crab({})=='hold' and cleaned and loots==beforeLoot,'full bag cleanup runs before missing boat pickup')
+arena.Prune=function() return false end
+arena.Loot=function(_,items) assert(#items==1 and items[1]==boatkit,'missing boat bypasses all ordinary supplies');return true end
+assert(s:Crab({})=='hold' and deploys==0,'ground boat pickup precedes deploying and boarding')
+arena.Loot=function() loots=loots+1;return false end
+bag={boatkit};assert(s:Crab({})=='hold' and deploys==1)
 now=1;s:Crab({});assert(deploys==1,'do not resend unacknowledged deploy every tick')
-now=7;assert(s:Crab({})=='failed','unacknowledged deployment must stop instead of walking into sea')
+now=7;assert(s:Crab({})=='hold' and not s.deploy,'delayed boat ack retries without walking into sea or ending arena loop')
 local boat=item('boat');boat.pos=Vector3(15,0,0)
 assert(s:Crab({boat})=='hold' and lastmove==boat.pos and s.deploy==nil,'board only server-replicated boat')
 local oar=item('oar_driftwood',EQUIPSLOTS.HANDS);oar.tags.oar=true

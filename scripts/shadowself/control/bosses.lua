@@ -114,6 +114,10 @@ function Boss:Brightshade(target)
  if endpoint then self:Release();return "attack",self:Select(endpoint) end
 end
 function Boss:Shell(target)
+ if self.c.plan and self.c.plan.arena then
+  local mode,picked=require("shadowself/control/arena_snails").Tick(self,target)
+  if mode then return mode,picked end
+ end
  if target.prefab~="slurtle" and target.prefab~="snurtle" then return end
  if self:AttackBlocked(target) then
   self.c.bridge:PauseAttack()

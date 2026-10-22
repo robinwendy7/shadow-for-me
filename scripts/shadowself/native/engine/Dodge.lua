@@ -796,7 +796,10 @@ addcreature("mutatedbearger", 'butt_pre_R', nil, 0, 100,
 	makeNoUsed('mutatedwarg')
 	makeNoUsed('warg')
 	makeNoUsed('rook_nightmare')
-	makeNoUsed('slurper')
+	-- 原版SGslurper：20帧开始滚动，30帧命中；扑头8帧起跳、24帧判定。
+	-- 只在这两个实际动作内侧躲，待机/行走/恢复时照常走A。
+	addcreature('slurper', 'atk', nil, 0, 30, { angle = 90 * DEGREES, update = false, dist = 4 })
+	addcreature('slurper', 'headslurp', nil, 0, 24, { angle = 90 * DEGREES, update = false, dist = 4 })
 	addcreature('spider_common', 'atk', calculate, 0, 25)
 	addcreature('spider_common', 'warrior_atk', nil, 0, 19, { angle = 120 * DEGREES, update = false })
 	addcreature('spider_moon', 'atk', calculate, 0, 25, nil, { combat_offset = -3 })

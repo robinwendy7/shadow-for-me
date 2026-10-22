@@ -235,6 +235,7 @@ function Mechanisms:Tick()
             self:Equip(bone);return true
         end
     end
+    if self.c.plan and self.c.plan.arena and require("shadowself/control/arena_tools").Recover(self.c,"panflute") then return true end
     return self:Pickup()
 end
 function Mechanisms:Dodge(target,base)

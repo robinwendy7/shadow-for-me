@@ -49,7 +49,23 @@ function Arena:Inventory()
  for _,item in ipairs(items) do owned[item.prefab]=true end
  return owned,items
 end
+-- 陷阱拾取以服务器关间状态为准，本地空扫描不能代表目标已全部击杀。
+function Arena:TrapReady()
+ local s=self.adapter:Snapshot()
+ return self.running and s and s.intermission and not s.settlement
+  and s.instance==self.instance and s.generation==self.generation and s.wave==self.wave
+  and #self:NearbyEnemies(60)==0
+end
+function Arena:CancelTrapPickup()
+ local item=self.pending_item
+ if not item or not Policy.TrapLoot(item,self.wave) then return end
+ for _,owned in ipairs(A.Items(self.player)) do if owned==item then return end end
+ if not self:TrapReady() then
+  A.Stop(self.player);self.pending_item=nil;self.pick_deadline=nil;self.next_item=nil
+ end
+end
 function Arena:Loot(items,cleared)
+ self:CancelTrapPickup()
  local owned,bag=self:Inventory();local inv=self.player.replica.inventory
  if self.pending_item then
   local held=false;for _,i in ipairs(bag) do if i==self.pending_item then held=true;break end end
@@ -77,7 +93,7 @@ function Arena:Loot(items,cleared)
     and Inventory.Want(item,bag,self.player,self.wave) and require("shadowself/control/arena_fire").Safe(self.player,item:GetPosition(),self.fire_zones) then wanted=item;break end
   end
  end
- if not wanted and cleared then
+ if not wanted and cleared and self:TrapReady() then
   for _,item in ipairs(items) do
    if Policy.TrapLoot(item,self.wave) and GetTime()>=(self.ignored[item.GUID] or 0)
     and Inventory.Want(item,bag,self.player,self.wave) and require("shadowself/control/arena_fire").Safe(self.player,item:GetPosition(),self.fire_zones) then
@@ -102,7 +118,14 @@ function Arena:Loot(items,cleared)
   self:Say("背包已满，保留后段关键装备；暂缓拾取"..(wanted:GetBasicDisplayName() or wanted.prefab))
   self.ignored[wanted.GUID]=GetTime()+5;return false
  end
- if A.Scene(self.player,wanted,ACTIONS.PICKUP) then
+ local guard
+ if Policy.TrapLoot(wanted,self.wave) then
+  local wave,instance,generation=self.wave,self.instance,self.generation
+  guard=function()
+   return self.wave==wave and self.instance==instance and self.generation==generation and self:TrapReady()
+  end
+ end
+ if A.Scene(self.player,wanted,ACTIONS.PICKUP,guard) then
   self.pending_item=wanted;self.pick_deadline=GetTime()+math.max(3,math.sqrt(self.player:GetPosition():DistSq(wanted:GetPosition()))/4+2)
   self.next_item=GetTime()+.2;return true
  end
@@ -110,7 +133,8 @@ function Arena:Loot(items,cleared)
 end
 function Arena:Prune(upcoming)
  if self.player.components.playercontroller:IsBusy() or GetTime()<(self.next_item or 0) then return false end
- local _,bag=self:Inventory();local item=upcoming and Inventory.ForecastDiscard(bag,self.player,self.wave,self.route) or Inventory.Discard(bag,self.player,self.wave)
+ local _,bag=self:Inventory();local item=Inventory.Cleanup(bag,self.player,self.wave,upcoming)
+ item=item or (upcoming and Inventory.ForecastDiscard(bag,self.player,self.wave,self.route) or Inventory.Discard(bag,self.player,self.wave))
  if item then
   self:StopCombat();self.player.replica.inventory:DropItemFromInvTile(item,false)
   self.ignored[item.GUID]=math.huge;self.next_item=GetTime()+.5;return true
@@ -143,7 +167,7 @@ function Arena:Equip(enemies)
 end
 function Arena:Combat()
  if self.bridge:Running() then return true end
- local plan={kind="fight",target="",coordinated=true,arena=true,arena_healing=self.healing,arena_no_whip=function() return self.trap_dogs end,arena_ground=function() return self.items or {} end,arena_contains=function(e)
+ local plan={kind="fight",target="",coordinated=true,arena=true,arena_remaining=function() return self.enemies or {} end,arena_wave=function() return self.wave end,arena_priority=function() return self.opening.target end,arena_healing=self.healing,arena_no_whip=function() return self.trap_dogs end,arena_ground=function() return self.items or {} end,arena_contains=function(e)
   return Policy.monsters[e.prefab] and self.encounters:Allowed(e) and self.player:GetPosition():DistSq(e:GetPosition())<60^2
  end}
  local ok,why=self.bridge:Start(plan,function() return true end)
@@ -201,6 +225,7 @@ function Arena:Tick()
    self.wave=snapshot.wave;self.route=snapshot.route;self.pending_item=nil;self.ignored={};self.encounters:Reset();self.opening:Reset();self.raw_entities=nil
    local policy=Policy.waves[self.wave];self:Say("角斗场第"..self.wave.."关："..(policy and policy.note or "按当前敌人处理。"))
   end
+  self:CancelTrapPickup()
   local enemies,items=self:Entities()
   self.items=items;self.enemies=enemies
   self.trap_dogs=false
@@ -209,6 +234,9 @@ function Arena:Tick()
   end
   local fire=require("shadowself/control/arena_fire");local p=self.player:GetPosition()
   self.fire_zones=fire.Zones(self.player,TheSim:FindEntities(p.x,0,p.z,16,nil,{"INLIMBO"}))
+  if self.wave==2 then
+   for _,zone in ipairs(fire.WebZones(self.player,self.entities or {})) do self.fire_zones[#self.fire_zones+1]=zone end
+  end
   if not self.bridge:Running() then
    local escape=fire.Escape(self.player,self.fire_zones)
    if escape then

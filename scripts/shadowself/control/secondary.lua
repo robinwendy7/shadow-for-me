@@ -93,6 +93,10 @@ function Secondary:LaneBlocked(point,primary)
 end
 function Secondary:Point(point,primary,accept)
     self:Scan()
+    if #self.enemies>=2 then
+        local joint=require("shadowself/control/crowdroute").Choose(self,point,primary,accept)
+        if joint then return joint end
+    end
     if not Nav.Obstructed(self,point,primary) and not self:LaneBlocked(point,primary) and (not accept or accept(point)) then return point end
     local p=self.player:GetPosition();local ep=primary:GetPosition()
     local radius=math.sqrt(point:DistSq(ep));local best,score
@@ -111,7 +115,7 @@ function Secondary:Point(point,primary,accept)
 end
 function Secondary:Wrap(primary,data,checktab)
     if primary and primary.prefab=="shadowthrall_hands" then return data end
-    if data and data.exclusive and primary.prefab~="bishop" and primary.prefab~="bishop_nightmare" and primary.prefab~="sharkboi" and primary.prefab~="daywalker" then return data end
+    if data and data.exclusive and primary.prefab~="bishop" and primary.prefab~="bishop_nightmare" and primary.prefab~="sharkboi" and primary.prefab~="daywalker" and primary.prefab~="rook" and primary.prefab~="rook_nightmare" then return data end
     if self.c.queen_active and self.c.beequeen and self.c.beequeen.late then self.pending=nil;return data end
     self:Scan()
     if not data then
@@ -124,7 +128,7 @@ function Secondary:Wrap(primary,data,checktab)
         return data
     end
     local c=self.c
-    if c.charge_target==primary then return data end -- keep fixed straight charge dodge
+    if c.charge_target==primary and #self.enemies<2 then return data end -- 单挑保留原来的直线躲冲撞。
     local has_other=#self.hazards>0
     for _,e in ipairs(self.enemies) do if e~=primary then has_other=true;break end end
     if not has_other then return data end
@@ -139,6 +143,8 @@ function Secondary:Wrap(primary,data,checktab)
     return wrapped
 end
 function Secondary:AfterDodge(captured)
+ local threat=self:Danger(captured)
+ if threat then self:Select(threat);return threat end
  local preferred=self:Preferred()
  if preferred then self:Select(preferred);return preferred end
  local c=self.c
@@ -156,7 +162,8 @@ function Secondary:BeforeAttack(check_only)
     self:Scan()
     local e=self.pending;self.pending=nil
     -- 每次攻击都检查侧方真实前摇，不依赖上次走位留下的pending。
-    local danger=self:Danger(self.c.h.ent)
+    local danger
+    if #self.enemies>1 then danger=self:Danger(nil) else danger=self:Danger(self.c.h.ent) end
     if danger then
         if check_only then self.pending=danger else self:Select(danger) end
         return false

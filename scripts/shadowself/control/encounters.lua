@@ -39,7 +39,8 @@ function Encounters:Walrus(target)
     local dog,near
     local wp=walrus:GetPosition();local pos=c.player:GetPosition()
     for _,e in ipairs(c.enemies) do
-        if e.prefab=="icehound" and live(e) and e:GetPosition():DistSq(wp)<20^2 then
+        -- 威胁扫描含睡眠陷阱狗；选为攻击目标前仍须遵守战斗层许可。
+        if e.prefab=="icehound" and live(e) and c.bridge.allowed(e) and e:GetPosition():DistSq(wp)<20^2 then
             local d=pos:DistSq(e:GetPosition());if not near or d<near then dog,near=e,d end
         end
     end
@@ -48,6 +49,8 @@ function Encounters:Walrus(target)
         return "attack",self:Target(dog)
     end
     self:Target(walrus)
+    -- 角斗场强制仇恨且有场地边界：清醒冰狗优先，其后直接近身压制海象。
+    if c.plan and c.plan.arena then self:Release();return "attack",walrus end
     if self.walrus_stage=="retreat" then
         local outside=math.max(TUNING.WALRUS_DART_RANGE or 25,TUNING.WALRUS_LOSETARGET_DIST or 30)+1.5
         if distance(pos,wp)>=outside then self.walrus_outside=true end
@@ -133,6 +136,11 @@ function Encounters:Goats(target)
     for _,e in ipairs(c.enemies) do if e.prefab=="lightninggoat" and live(e) and c.bridge.allowed(e) then
         goats[#goats+1]=e;charged=charged or e:HasTag("charged")
     end end
+    if c.plan and c.plan.arena then
+        self.arena_goats=self.arena_goats or require("shadowself/control/arena_goats")(self)
+        local mode,picked=self.arena_goats:Tick(goats)
+        if mode then return mode,picked end
+    end
     if charged and self:Insulate(goats) then return "support",target end
     if #goats<2 then self.goat=nil;self:Release();return end
     local now=GetTime();local pos=c.player:GetPosition();local state=self.goat
@@ -165,12 +173,29 @@ function Encounters:Goats(target)
     self:Release();return "attack",self:Target(best or target)
 end
 function Encounters:Tick(target)
-    self.c.bridge.priority_target=nil;self.allowed={}
+    local previous_wind=self.c.arena_wind;self.c.arena_wind=nil
+    self.c.bridge.priority_target=self.c.plan and self.c.plan.arena_priority and self.c.plan.arena_priority() or nil;self.allowed={}
     if target.prefab~="lightninggoat" then self.c.gear.protected_slots=nil end
     if self.walrus and live(self.walrus) then self.allowed[self.walrus]=true end
-    local mode,picked=self:Walrus(target)
+    local mode,picked
+    if self.c.plan and self.c.plan.arena then
+        self.arena_hunts=self.arena_hunts or require("shadowself/control/arena_hunts")(self)
+        mode,picked=self.arena_hunts:Tick(target)
+    end
+    if not mode then mode,picked=self:Walrus(target) end
     if not mode then mode,picked=self:Penguins(target) end
     if not mode then mode,picked=self:Goats(target) end
+    if not mode and self.c.plan and self.c.plan.arena then
+        local crowd={};local policy=require("shadowself/control/targetpolicy")
+        for _,e in ipairs(self.c.enemies) do
+            if live(e) and policy.Creature(e) and not policy.Boss(e) and self.c.bridge.allowed(e) then crowd[#crowd+1]=e end
+        end
+        if #crowd>=4 and not policy.Boss(target) then
+            self.arena_crowd=self.arena_crowd or require("shadowself/control/arena_goats")(self,"群怪")
+            mode,picked=self.arena_crowd:Tick(crowd)
+        end
+    end
+    if previous_wind and previous_wind~=self.c.arena_wind then previous_wind:Stop() end
     if not mode then self:Release() end
     return mode,picked
 end
@@ -190,5 +215,5 @@ function Encounters:Dodge(target,base)
     end
     return base
 end
-function Encounters:Stop() self:Release();self.c.gear.protected_slots=nil end
+function Encounters:Stop() if self.c.arena_wind then self.c.arena_wind:Stop() end;self:Release();self.c.gear.protected_slots=nil end
 return Encounters

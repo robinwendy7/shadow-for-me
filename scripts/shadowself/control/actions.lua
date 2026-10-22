@@ -89,6 +89,20 @@ function M.Deploy(player,item,point)
  end
  return true
 end
+-- 风向标必须先确认在手，再走原版右键点击；不把背包控制器静默拒绝当成已施法。
+function M.CastStaff(player,item,target,guard)
+ local pc=player.components.playercontroller;local inv=player.replica.inventory
+ local function valid()
+  return item:IsValid() and target:IsValid() and not target:HasTag("dead") and not target:HasTag("isdead")
+   and inv:GetEquippedItem(EQUIPSLOTS.HANDS)==item and (not guard or guard())
+ end
+ if pc:IsBusy() or not valid() then return false end
+ local picker=player.components.playeractionpicker
+ for _,act in ipairs(picker:GetUseItemActions(target,item,true) or {}) do
+  if act.action==ACTIONS.CASTSPELL then return DoScene(player,target,act,true,valid) end
+ end
+ return false
+end
 function M.UseOn(player,item,target,wanted)
     local picker=player.components.playeractionpicker;local pc=player.components.playercontroller
     for _,right in ipairs({true,false}) do

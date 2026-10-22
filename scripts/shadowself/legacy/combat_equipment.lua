@@ -82,7 +82,7 @@ function Gear:Weapon()
     local boss=policy.Boss(target)
     local electric=damage.Electric(self.player)
     local wet=target and (target.GetIsWet and target:GetIsWet() or target:HasTag("wet"))
-    for _,item in ipairs(items) do if E.Weapon(self.player,item) and not (no_whip and item.prefab=="whip") then
+    for _,item in ipairs(items) do if E.Weapon(self.player,item) and not (no_whip and item.prefab=="whip") and (item.prefab~="nightstick" or wet and not electric) then
         local travel=E.Mult(item)>=1.2 or item.prefab=="cane" or item.prefab=="orangestaff"
         local score=damage.Score(self.player,item,self:Damage(item),target)+(item==hand and .1 or 0)-(travel and 1000 or 0)
         if item.prefab=="nightstick" and electric then score=score-10000 end

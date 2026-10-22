@@ -24,6 +24,7 @@ function Bridge:Start(plan,matches)
     self.plan=plan;self.clear_since=nil;self.next_finish_scan=nil;self.finished=false
     local function allowed(e)
         if not e or not e:IsValid() or e==self.player or e:HasTag("player") or e:HasTag("playerghost") then return false end
+        if plan.arena and require("shadowself/control/arena_snails").Burning(e) then return false end
         local n=e.prefab or ""
         if n:find("sandspike_",1,true)==1 or n=="sandblock" then return false end
         local crab=self.coordinator and self.coordinator.crabking
@@ -58,7 +59,7 @@ function Bridge:Start(plan,matches)
     local original=h.GetAttackTargets
     self.wrappers.GetAttackTargets={old=original}
     local wrapper=function(object,range)
-        original(object,range)
+        original(object,plan.arena and math.max(range or 0,30) or range)
         for e in pairs(object.selected_ents or {}) do if not allowed(e) then object.selected_ents[e]=nil end end
     end
     self.wrappers.GetAttackTargets.current=wrapper;h.GetAttackTargets=wrapper
@@ -262,6 +263,8 @@ function Bridge:Coordinate(plan)
             Debug.Performed(self.coordinator,data)
             require("shadowself/control/queenflute").OnAction(self.coordinator,data)
             require("shadowself/control/guardcontrol").OnAction(self.coordinator,data)
+            local wind=self.coordinator.arena_wind
+            if wind and act and act.action==ACTIONS.CASTSPELL then wind:Performed(act) end
             if act and (act.action==ACTIONS.JUMPIN or act.action==ACTIONS.JUMPOFF or act.action==ACTIONS.HOP) then self.manual_until=GetTime()+2 end
         end
         self.player:ListenForEvent("performaction",self.manual_listener)
