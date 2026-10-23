@@ -70,6 +70,9 @@ function Takeover:CanStart(plan)
     return true
 end
 function Takeover:HandleText(text)
+    if text=="查看冒险Boss" or text=="查看冒险boss" or text=="冒险Boss记录" then
+        self:Say(require("shadowself/control/adventureworld/registry").Report());return true
+    end
     local topics={["看看背包"]="inventory",["背包有什么"]="inventory",["查看装备"]="equipment",["查看三维"]="stats",["我在哪"]="position",["周围有什么"]="nearby",["查看天气"]="world"}
     if topics[text] then
         local result=require("shadowself/zom/StateReporter").Get(_G,self.r.owner,topics[text])
@@ -89,7 +92,7 @@ function Takeover:HandleText(text)
         if not ok then self.pending=nil;if self.r.speech then self.r.speech:ClearPin() end;self:Say(why);return true end
         local plan=self.pending.plan;self.pending=nil
         if self.r.speech then self.r.speech:ClearPin() end
-        if plan.kind~="fight" and plan.kind~="dodge" and plan.kind~="autonomy" and plan.kind~="arena" then plan.protect=true end
+        if plan.kind~="fight" and plan.kind~="dodge" and plan.kind~="autonomy" and plan.kind~="arena" and plan.kind~="adventureworld" then plan.protect=true end
         if self.phase=="active" then
             self.task=plan;self.jobs:Set(plan);self.job_started=nil
             self:Speak("enter",{task=plan.label})

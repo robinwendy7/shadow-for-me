@@ -42,6 +42,7 @@ function Bridge:Start(plan,matches)
         local health=e.replica and e.replica.health
         if health and health.IsDead and health:IsDead() then return false end
         if plan.arena and plan.arena_contains and plan.arena_contains(e) and e.replica and e.replica.combat then return true end
+        if plan.adventure and plan.adventure_contains and plan.adventure_contains(e) and e.replica and e.replica.combat then return true end
         if self.resume_target==e or self.priority_target==e then return true end
         if self.coordinator and self.coordinator.encounters and self.coordinator.encounters.allowed[e] then return true end
         if self.coordinator and self.coordinator.beequeen and self.coordinator.beequeen.allow==e then return true end

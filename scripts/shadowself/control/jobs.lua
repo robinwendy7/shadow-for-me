@@ -10,6 +10,8 @@ function Jobs:Matches(e,name)
     return display==name or e.prefab==name
 end
 function Jobs:Set(plan)
+    if self.adventureworld then self.adventureworld:Cancel();self.adventureworld=nil end
+    if plan.kind=="adventureworld" then self.adventureworld=require("shadowself/control/adventureworld/controller")(self.player,plan,self.report) end
     if self.arena then self.arena:Cancel();self.arena=nil end
     if plan.kind=="arena" then self.arena=require("shadowself/control/arena")(self.player,plan,self.report) end
     if self.travel then self.travel:Reset();self.travel=nil end
@@ -29,7 +31,7 @@ function Jobs:Set(plan)
     self.plan=plan;self.token={};self.item=nil;self.target=nil;self.before=nil;self.sent=nil;self.attempts=0
     self.ignored={};self.started=GetTime();self.last_progress=GetTime()
 end
-function Jobs:Cancel() if self.arena then self.arena:Cancel();self.arena=nil end;if self.travel then self.travel:Reset();self.travel=nil end;if self.fishing then self.fishing:Cancel();self.fishing=nil end;if self.cooking then self.cooking:Cancel();self.cooking=nil end;if self.guard then self.guard:Cancel();self.guard=nil end;self.guard_active=nil;if self.extended then self.extended:Cancel();self.extended=nil end;self.token=nil;self.plan=nil;self.target=nil;self.item=nil end
+function Jobs:Cancel() if self.adventureworld then self.adventureworld:Cancel();self.adventureworld=nil end;if self.arena then self.arena:Cancel();self.arena=nil end;if self.travel then self.travel:Reset();self.travel=nil end;if self.fishing then self.fishing:Cancel();self.fishing=nil end;if self.cooking then self.cooking:Cancel();self.cooking=nil end;if self.guard then self.guard:Cancel();self.guard=nil end;self.guard_active=nil;if self.extended then self.extended:Cancel();self.extended=nil end;self.token=nil;self.plan=nil;self.target=nil;self.item=nil end
 function Jobs:Eligible(e,kind)
     if not e:IsValid() or e==self.player or e:HasTag("INLIMBO") or e:HasTag("player") then return false end
     if kind=="pickup" then return e:HasTag("_inventoryitem") and e.replica.inventoryitem and not e.replica.inventoryitem:IsHeld() end
@@ -54,8 +56,9 @@ end
 function Jobs:Item(name)
     for _,e in ipairs(A.Items(self.player)) do if self:Matches(e,name) then return e end end
 end
-function Jobs:OwnsCombat() if self.arena then return self.arena:OwnsCombat() end;return self.guard and self.guard:OwnsCombat() or self.extended and self.extended:OwnsCombat() end
+function Jobs:OwnsCombat() if self.adventureworld then return self.adventureworld:OwnsCombat() end;if self.arena then return self.arena:OwnsCombat() end;return self.guard and self.guard:OwnsCombat() or self.extended and self.extended:OwnsCombat() end
 function Jobs:Tick()
+    if self.adventureworld then return self.adventureworld:Tick() end
     if self.arena then return self.arena:Tick() end
     if self.guard then
         local state,message=self.guard:Tick()

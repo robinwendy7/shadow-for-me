@@ -32,6 +32,7 @@ Assets = {
 }
 local function BindShadow(controls,owner)
     owner = owner or controls.owner
+    require("shadowself/control/adventureworld/registry").Install(G)
     if owner == nil or owner ~= G.ThePlayer or owner._shadowself ~= nil then return end
     require("shadowself/bombs").Bind(owner)
     local handoff=require("shadowself/handoff")
