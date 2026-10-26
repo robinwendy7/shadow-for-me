@@ -84,6 +84,7 @@ function Secondary:Preferred()
   and e:IsValid() and c.bridge.allowed(e) then return e end
 end
 function Secondary:Pulse()
+    if self.c.weaver and self.c.weaver:Active() then self.pending=nil;return end
     if require("shadowself/control/boneguard").Ready(self.c) then self.pending=nil;return end
     if self.c.queen_active and self.c.beequeen and self.c.beequeen.late then self.pending=nil;return end
     local c=self.c;local primary=c.h.ent

@@ -20,7 +20,7 @@ function Adapter:Snapshot()
  local settlement=self.settlement:GetModel()
  return {state=state,model=model,instance=id,generation=generation,kind=kind,wave=wave,route=route,
   intermission=model and model.status and model.status.text=="波次间休整" or false,
-  arena=model and model.visible~=false and (model.title or ""):find("角斗场",1,true)~=nil,
+  arena=model and model.visible~=false and ((model.title or ""):find("角斗场",1,true)~=nil or (model.title or ""):find("场地测试",1,true)~=nil),
   remaining_objectives=self:RemainingObjectives(id,generation,wave),
   settlement=settlement and settlement.visible~=false and settlement.mode_id=="ARENA" and settlement or nil}
 end

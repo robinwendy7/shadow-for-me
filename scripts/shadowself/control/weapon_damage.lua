@@ -1,6 +1,6 @@
 local M={}
 local planar={sword_lunarplant=30,voidcloth_scythe=18,pickaxe_lunarplant=10,shovel_lunarplant=10,shadow_battleaxe=10,spear_wathgrithr_lightning_charged=20}
-local bodies={lunarthrall_plant=true,mutatedwarg=true,mutateddeerclops=true,mutatedbearger=true,gestalt_guard_evolved=true,shadowthrall_hands=true,shadowthrall_horns=true,shadowthrall_wings=true,shadowthrall_mouth=true,shadowthrall_centipede=true,wagboss_robot=true,lunar_grazer=true,gelblob=true,ruins_shadeling=true,fused_shadeling=true}
+local bodies={rocky_boss_shadow=true,bat_boss_shadow=true,charlie_boss=true,shrouden=true,lunarthrall_plant=true,mutatedwarg=true,mutateddeerclops=true,mutatedbearger=true,gestalt_guard_evolved=true,shadowthrall_hands=true,shadowthrall_horns=true,shadowthrall_wings=true,shadowthrall_mouth=true,shadowthrall_centipede=true,wagboss_robot=true,lunar_grazer=true,gelblob=true,ruins_shadeling=true,fused_shadeling=true}
 
 function M.Planar(item)
  local p=item.components and item.components.planardamage

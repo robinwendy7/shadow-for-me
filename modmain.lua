@@ -1,6 +1,10 @@
 -- 入口仅绑定本机 HUD。无 prefab 注册，无服务器钩子，无 RPC。
 local G = GLOBAL
 if G.TheNet:IsDedicated() then return end
+local BossDebug=require("shadowself/control/newbosses/debug")
+BossDebug.Configure(GetModConfigData("newboss_debug")~=false)
+local WeaverDebug=require("shadowself/control/weaver/debug")
+WeaverDebug.Configure(GetModConfigData("weaver_debug")~=false)
 local QueenDebug=require("shadowself/control/queendebug")
 G.print("[ShadowSelf] "..QueenDebug.VERSION.." loaded: embedded combat")
 require("shadowself/native").Init(MODROOT)
@@ -33,6 +37,7 @@ Assets = {
 }
 local function BindShadow(controls,owner)
     owner = owner or controls.owner
+    require("shadowself/control/adventureworld/registry").Install(G)
     if owner == nil or owner ~= G.ThePlayer or owner._shadowself ~= nil then return end
     require("shadowself/bombs").Bind(owner)
     local handoff=require("shadowself/handoff")

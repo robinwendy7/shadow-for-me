@@ -73,8 +73,9 @@ function Gear:Weapon()
     local plan=self.combat and self.combat.plan
     local stage=plan and plan.arena_strategy
     if stage and stage.weapon and self:Owned(stage.weapon) and E.Usable(self.player,stage.weapon) then return stage.weapon end
+    local newbosses=self.combat and self.combat.newbosses
     local no_whip=plan and plan.arena and plan.arena_no_whip and plan.arena_no_whip()
-    if self.forced_weapon and not (no_whip and self.forced_weapon.prefab=="whip") and self:Owned(self.forced_weapon) and E.Usable(self.player,self.forced_weapon) then return self.forced_weapon end
+    if self.forced_weapon and not (no_whip and self.forced_weapon.prefab=="whip") and self:Owned(self.forced_weapon) and E.Usable(self.player,self.forced_weapon) and (not newbosses or newbosses:WeaponAllowed(self.forced_weapon)) then return self.forced_weapon end
     local items,hand=self:Items();local best,bestscore
     if plan and plan.arena and plan.arena_wave and plan.arena_wave()==8 then
         if hand and hand.prefab=="ruins_bat" and E.Usable(self.player,hand) then return hand end
@@ -92,7 +93,7 @@ function Gear:Weapon()
     local boss=policy.Boss(target)
     local electric=damage.Electric(self.player)
     local wet=target and (target.GetIsWet and target:GetIsWet() or target:HasTag("wet"))
-      for _,item in ipairs(items) do if E.Weapon(self.player,item) and not (plan and plan.arena and item.prefab=="torch") and not (no_whip and item.prefab=="whip") and (item.prefab~="nightstick" or wet and not electric) then
+      for _,item in ipairs(items) do if E.Weapon(self.player,item) and (not newbosses or newbosses:WeaponAllowed(item)) and not (plan and plan.arena and item.prefab=="torch") and not (no_whip and item.prefab=="whip") and (item.prefab~="nightstick" or wet and not electric) then
         local travel=E.Mult(item)>=1.2 or item.prefab=="cane" or item.prefab=="orangestaff"
         local score=damage.Score(self.player,item,self:Damage(item),target)+(item==hand and .1 or 0)-(travel and 1000 or 0)
         if item.prefab=="nightstick" and electric then score=score-10000 end

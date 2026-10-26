@@ -12,6 +12,11 @@ local Coordinator=Class(function(self,bridge,plan)
     self.gear=R.CombatEquipment(self);self.tactics=R.CombatTactics(self)
     self.travel=require("shadowself/control/travel")(self.player,self.gear)
     self.hazards={};self.profiles={};self.observed={};self.enemies={}
+    -- 角斗场完全由合伙人的关卡策略拥有；独立Boss控制器只用于场外战斗。
+    if not plan.arena then
+        self.weaver=require("shadowself/control/weaver/controller")(self)
+        self.newbosses=require("shadowself/control/newbosses/controller")(self)
+    end
     self.bosses=require("shadowself/control/bosses")(self)
     self.encounters=require("shadowself/control/encounters")(self)
     self.supplies=require("shadowself/control/supplies")(self)
@@ -60,6 +65,7 @@ function Coordinator:Move(point,label)
     if GetTime()>=(self.next_move or 0) then
         require("shadowself/native").Get().POS_util:GoToPoint(point.x,point.z);self.next_move=GetTime()+.1
         require("shadowself/control/queendebug").Move(self,point,label)
+        if self.newbosses and self.newbosses.debug then self.newbosses.debug:Move(point,label) end
     end
 end
 function Coordinator:Dodge(enemies,observed,label)
@@ -162,6 +168,10 @@ end
 -- Minimal native bridge. Old Pack/PermitAttack/gear movement code is not called
 -- by combat.lua; ordinary enemies retain the exact original 3014 execution path.
 function Coordinator:NativePulse()
+    if self.weaver and self.weaver:Active() then
+        self.special_active=true;self.blocked=self.weaver:Holding();return
+    end
+    if self.newbosses and self.newbosses:Holding() then self.special_active=true;self.blocked=true;return end
     if require("shadowself/control/boneguard").Attack(self,self.h.ent) then return end
     if self.plan and self.plan.arena_clockwork then self.plan.arena_clockwork:Observe(self) end
     self.blocked=false;self.special_active=false;self.queen_active=false;self.target=self.h.ent
@@ -258,5 +268,8 @@ function Coordinator:PermitAttack()
     -- 旧 AI 的联合作战窗口：当前目标以外的前摇覆盖落点时不补刀。
     return true
 end
-function Coordinator:Stop() if self.encounters then self.encounters:Stop() end;if self.mechanisms then self.mechanisms:Stop() end;if self.maxwell then self.maxwell:Stop() end;self.actions:Stop();self.gear:Reset();self.tactics:Reset() end
+function Coordinator:Stop()
+    if self.weaver then self.weaver:Stop() end
+    if self.newbosses then self.newbosses:Stop() end
+    if self.encounters then self.encounters:Stop() end;if self.mechanisms then self.mechanisms:Stop() end;if self.maxwell then self.maxwell:Stop() end;self.actions:Stop();self.gear:Reset();self.tactics:Reset() end
 return Coordinator

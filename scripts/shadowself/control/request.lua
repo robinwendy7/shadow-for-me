@@ -77,6 +77,18 @@ end
 -- 旧基础行为保留；新增 zom 的多步、数量及更多交互。
 function M.Parse(text)
     if M.IsStop(text) then return nil end
+    local adventure=text:find("自动冒险",1,true) or text:find("接管冒险",1,true)
+        or text:find("冒险世界",1,true) and (text:find("帮我",1,true) or text:find("自动",1,true) or text:find("接管",1,true))
+    if adventure then
+        for _,neg in ipairs({"不要","不用","别","不需要","会不会","能不能介绍"}) do
+            if text:find(neg,1,true) then return nil,"好，不开启冒险接管。" end
+        end
+        local grade
+        for i,label in ipairs(require("shadowself/control/adventureworld/config").grades) do
+            if text:find(label,1,true) then grade=i;break end
+        end
+        return {kind="adventureworld",grade=grade,label="冒险世界自动寻猎"..(grade and "（"..require("shadowself/control/adventureworld/config").grades[grade].."）" or ""),text=text}
+    end
     if text:find("角斗场",1,true) and (text:find("循环",1,true) or text:find("自动",1,true) or text:find("帮我打",1,true)) then
         if text:find("不要",1,true) or text:find("别",1,true) or text:find("不需要",1,true) then return nil,"好，不开启角斗场循环。" end
         return {kind="arena",loop=true,label="经典单人角斗场循环",text=text}

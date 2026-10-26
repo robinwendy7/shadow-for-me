@@ -24,6 +24,9 @@ function Bridge:Start(plan,matches)
     self.plan=plan;self.clear_since=nil;self.next_finish_scan=nil;self.finished=false
     local function allowed(e)
         if not e or not e:IsValid() or e==self.player or e:HasTag("player") or e:HasTag("playerghost") then return false end
+        local c=self.coordinator
+        if c and c.weaver and c.weaver:AttackBlocked(e) then return false end
+        if c and c.newbosses and require("shadowself/control/newbosses/controller").Unattackable(e) then return false end
         if plan.arena and plan.arena_wave and plan.arena_wave()==11 and (e.prefab=="chest_mimic" or e.prefab=="chest_mimic_revealed") then return false end
         if plan.arena and require("shadowself/control/arena_snails").Burning(e) then return false end
         local n=e.prefab or ""
@@ -47,6 +50,7 @@ function Bridge:Start(plan,matches)
         if health and health.IsDead and health:IsDead() then return false end
         if arena_bird then return true end
         if plan.arena and plan.arena_contains and plan.arena_contains(e) and e.replica and e.replica.combat then return true end
+        if plan.adventure and plan.adventure_contains and plan.adventure_contains(e) and e.replica and e.replica.combat then return true end
         if self.resume_target==e or self.priority_target==e then return true end
         if self.coordinator and self.coordinator.encounters and self.coordinator.encounters.allowed[e] then return true end
         if self.coordinator and self.coordinator.beequeen and self.coordinator.beequeen.allow==e then return true end
@@ -78,6 +82,8 @@ function Bridge:Start(plan,matches)
     local closest=h.GetClosestTarget
     if closest then
         local pick=function(object,...)
+            local w=self.coordinator and self.coordinator.weaver
+            if w and w:Active() and w.focus and allowed(w.focus) then return w.focus end
             local bird=require("shadowself/control/targetpolicy").Bird(self)
             if bird then return bird end
             local e=self.priority_target
@@ -198,6 +204,13 @@ function Bridge:Supervise()
             else
                 h.PC=self.player.components.playercontroller;h.combat=self.player.replica.combat
                 h.inv=self.player.replica.inventory;h.rangeoffset=.5
+                local weaver=c.weaver
+                if weaver then
+                    weaver:Scan()
+                    if weaver:Active() then c:Scan();c:HitRecovery() end
+                end
+                local exclusive=weaver and weaver:Tick()
+                if not exclusive then
                 h:GetAttackTargets(24)
                 local target=h:GetClosestTarget()
                 if target and self.allowed(target) then
@@ -283,6 +296,7 @@ function Bridge:Supervise()
                     if not danger then danger=c.mechanisms:Tick() end
                     if not danger and c.healing then c.healing:Tick(c) end
                 end
+                end -- non-arena Weaver supervision
             end
             Debug.Sample(self.coordinator and self.coordinator.beequeen)
             Sleep(FRAMES)
@@ -341,6 +355,7 @@ function Bridge:Coordinate(plan)
         self.manual_listener=function(_,data)
             local act=data and (data.action or data)
             Debug.Performed(self.coordinator,data)
+            if self.coordinator.newbosses and self.coordinator.newbosses.debug then self.coordinator.newbosses.debug:Action(act) end
             require("shadowself/control/queenflute").OnAction(self.coordinator,data)
             require("shadowself/control/guardcontrol").OnAction(self.coordinator,data)
             local wind=self.coordinator.arena_wind
@@ -352,6 +367,7 @@ function Bridge:Coordinate(plan)
             if data then
                 if self.coordinator.crabking then self.coordinator.crabking:Interrupt() end
                 Debug.Hit(self.coordinator,data)
+                if self.coordinator.newbosses and self.coordinator.newbosses.debug then self.coordinator.newbosses.debug:Hit(data) end
                 require("shadowself/control/queenflute").Interrupt(self.coordinator,"attacked:"..Debug.Entity(data.attacker))
             end
         end
@@ -385,6 +401,7 @@ function Bridge:Coordinate(plan)
         wrap(name,function(old,object,...)
             local c=self.coordinator
             if self.pause_requested then return false end
+            if c.weaver and c.weaver:Active() and c.weaver:AttackBlocked(object.ent) then return false end
             if require("shadowself/control/arena_windcycle").Blocked(c) then return false end
             if name=="CloseAndAttack" and c.plan and c.plan.arena then
                 local hand=c.player.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)
@@ -394,6 +411,7 @@ function Bridge:Coordinate(plan)
             if c.plan and c.plan.arena_clockwork and c.plan.arena_clockwork:Block(c) then return false end
             if c.plan and c.plan.arena_whip_state and not c.plan.arena_whip_state:CanAttack(c.player) then return false end
             local explicit=...;local victim=(name=="CloseAndAttack" or name=="ShouldAtkWhenDodging") and type(explicit)=="table" and explicit.prefab and explicit or object.ent
+            if c.weaver and c.weaver:Active() and c.weaver:AttackBlocked(victim) then return false end
             if c.plan and c.plan.arena and c.plan.arena_wave and c.plan.arena_wave()==4 and victim and victim.prefab=="bearger" then
                 local weapon=c.player.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)
                 if not weapon or not require("shadowself/control/arena_inventory").Weapon(weapon,c.player)
@@ -421,13 +439,13 @@ function Bridge:Coordinate(plan)
             if c.bosses and c.bosses.AttackBlocked and c.bosses:AttackBlocked(object.ent) then return false end
             if self.chasing then return false end
             if c.blocked and (c.special_active or not self:OwnsThread()) then return false end
-            if not c.secondary:BeforeAttack(name=="ShouldAtkWhenDodging") then return false end
+            if not (c.weaver and c.weaver:Active()) and not c.secondary:BeforeAttack(name=="ShouldAtkWhenDodging") then return false end
             if name=="CloseAndAttack" then
                 if c.travel.finish_deferred then c.travel:EndDodge(c.snapshot) end
                 c.travel:UpdateDodge(c.snapshot)
             end
             local argv={...}
-            if name=="ShouldAtkWhenDodging" and not c.queen_active and not (c.crabking and c.crabking:Active()) then
+            if name=="ShouldAtkWhenDodging" and not (c.weaver and c.weaver:Active()) and not c.queen_active and not (c.crabking and c.crabking:Active()) then
                 local nearest=c.secondary:Preferred() or require("shadowself/control/targetpolicy").Nearest(self)
                 if nearest and nearest~=victim then return false end
             end
@@ -444,6 +462,8 @@ function Bridge:Coordinate(plan)
     end
     -- Never replace POS_util.GoToPoint/WalkTo/DoDodge: native movement is intact.
     wrap("IsAttackPre",function(old,object,target,...)
+        local w=self.coordinator.weaver
+        if w and w:Active() and w:Participant(target) then return false end
         if require("shadowself/control/boneguard").Ready(self.coordinator) then return false end
         self.coordinator.travel:UpdateDodge(self.coordinator.snapshot)
         local data=require("shadowself/control/boneguard").Early(self.coordinator,target,old(object,target,...))
@@ -470,6 +490,9 @@ function Bridge:Coordinate(plan)
 end
 -- 仇恨/指定目标连续消失一秒才判定结束，避免换目标和死亡同步间隙误退。
 function Bridge:Finished()
+    if self.coordinator and self.coordinator.weaver and self.coordinator.weaver:Active() then
+        self.clear_since=nil;self.finished=false;return false
+    end
     local now=GetTime()
     if now<(self.next_finish_scan or 0) then return self.finished or false end
     self.next_finish_scan=now+.2

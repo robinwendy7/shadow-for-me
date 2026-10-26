@@ -220,6 +220,7 @@ function Mechanisms:Incoming()
  return false
 end
 function Mechanisms:Tick()
+    if self.c.newbosses and self.c.newbosses:Tick() then return true end
     if require("shadowself/control/arena_bats").Detach(self.c) then return true end
     if require("shadowself/control/arena_slurper").Tick(self.c) then return true end
     self:Scan()

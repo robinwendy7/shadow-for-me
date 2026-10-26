@@ -148,6 +148,7 @@ local function waking(e)
  return n:find("tired_wakeup",1,true) or n:find("tired_pst",1,true)
 end
 function Boss:AttackBlocked(e)
+ if self.c.newbosses and self.c.newbosses:Blocked(e) then return true end
  if not require("shadowself/control/arena_rabbit").Allowed(self.c,e) then return true end
  if self.c.plan and self.c.plan.arena_lunar12 and e and e:HasTag("NOCLICK") then return true end
  local stage12=self.c.plan and self.c.plan.arena_stage12
@@ -641,6 +642,8 @@ local profiles={
  sharkboi={atk1={16,5},atk2={4,5},atk2_delay={1000,5},atk3={12,5},ice_summon={42,6},torpedo_pre={1000,6},torpedo_jump={1000,6},torpedo_loop={1000,6},icedive_standing_jump_pre={1000,5},icedive_jump_pre={1000,5},icedive_jump={1000,5},icedive_dig_pre={1000,5},icedive_dig_pst={4,5}}
 }
 function Boss:Dodge(target,base)
+ if self.c.weaver and self.c.weaver:Active() and self.c.weaver:Participant(target) then return false end
+ if self.c.newbosses and require("shadowself/control/newbosses/controller").Known(target) then return false end
  local window=require("shadowself/control/arena_attackwindows").Dodge(self.c,target,base)
  if window~=base then return window end
  local bat=require("shadowself/control/arena_bats").Dodge(self.c,target,base)
