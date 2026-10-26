@@ -9,7 +9,7 @@ function M.Lane(c,e)
  elseif (n=="eyeofterror" or n=="twinofterror1" or n=="twinofterror2") and (anim(e,"charge_loop") or anim(e,"charge_pre") and e.AnimState:GetCurrentAnimationFrame()>=math.max(0,25-require("shadowself/control/nettiming").Frames(c))) then speed=16
  elseif n=="daywalker" and (anim(e,"atk3") or anim(e,"run_pre")) then speed=11;width=3+c.player:GetPhysicsRadius(0)+.6
  elseif n=="shadowthrall_hands" and (anim(e,"run_pre") or anim(e,"run_loop")) then speed=12;width=1.8+c.player:GetPhysicsRadius(0)+.5
- elseif n=="sharkboi" and (anim(e,"torpedo_loop") or anim(e,"torpedo_jump")) then speed=16
+ elseif n=="sharkboi" and (anim(e,"torpedo_loop") or anim(e,"torpedo_jump")) then speed=16;width=3+c.player:GetPhysicsRadius(0)+.8
  end
  if not speed then return end
  local r=e.Transform:GetRotation()*math.pi/180

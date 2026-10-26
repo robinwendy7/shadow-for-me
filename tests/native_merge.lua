@@ -259,7 +259,7 @@ check(gear:Mobile({night=true})==torch,"darkness preserves sole hand light inste
 print("PASS: real AI Player travel gear, synchronized weapon restoration and darkness light")
 
 -- Real ActionLibrary/Equipment busy rejection must not become a 3-second item ban.
-local saved_busy=pc.IsBusy;local busy=true;pc.IsBusy=function() return busy end
+local saved_busy=pc.IsBusy;local busy=true;pc.IsBusy=function() return busy end;now=now+1
 p.replica.inventory.items={cane,spear};p.replica.inventory.equips.hands=cane
 gear:Reset();local rpc_before=#rpc_log
 check(not gear:Swap("attack",{}) and not gear.pending and not gear.failed[spear],"hit busy does not create equip timeout or weapon failure cooldown")
@@ -269,7 +269,7 @@ check(not gear:Swap("attack",{}) and gear.pending and gear.pending.item==spear,"
 p.replica.inventory.equips.hands=spear;now=now+.033
 check(gear:Swap("attack",{}),"confirmed hand resumes combat on next frame")
 -- Busy can begin between the initial controller check and Execute.
-gear:Reset();p.replica.inventory.equips.hands=cane
+gear:Reset();p.replica.inventory.equips.hands=cane;now=now+.5
 local execute=gear.combat.actions.Execute
 gear.combat.actions.Execute=function() return false,"角色忙碌" end
 check(not gear:Swap("attack",{}) and not gear.failed[spear],"late native busy rejection is transient too")
@@ -282,6 +282,7 @@ pc.IsBusy=saved_busy
 print("PASS: real equipment busy/late busy never blacklists; first recovered frame retries; stale travel acknowledgement releases")
 
 -- Real native inventory equip acknowledgement during dodge, not a distance chase.
+now=now+.5 -- Independent dodge transaction after the prior equip test's rate window.
 local Travel=require("shadowself/control/travel");local dodge=Travel(p,gear)
 p.replica.inventory.items={spear,cane};p.replica.inventory.equips.hands=spear;gear:Reset()
 dodge:BeginDodge({night=false})

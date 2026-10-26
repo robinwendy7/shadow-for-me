@@ -13,9 +13,9 @@ function Boss:Item(name)
  local p=self.c.player;local gear=self.c.gear
  return require("shadowself/control/itemchoice").Pick(self.item_choice,name,A.Items(p),p.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS),gear and gear.pending)
 end
-function Boss:Move(q,label,target)
+function Boss:Move(q,label,target,verified)
  local c=self.c;c.bridge:PauseAttack();c.travel:BeginDodge(c.snapshot)
- c:Move(Nav.Select(c,q,target),label);self.moving=true;return "move",target
+ c:Move(verified and q or Nav.Select(c,q,target),label);self.moving=true;return "move",target
 end
 function Boss:Release()
  if self.moving then self.c.travel:EndDodge(self.c.snapshot);self.moving=nil end
@@ -27,11 +27,92 @@ end
 function Boss:Select(e)
  self.c.bridge.priority_target=e;self.c.bridge.resume_target=e;return e
 end
+-- 骑士残局每次挥击均先完整退到攻击圈外，再恢复攻击。
+function Boss:KnightState(e)
+ if not require("shadowself/control/targetpolicy").KnightOnly(self.c.bridge,e) then return end
+ local c=self.c;local p=c.player:GetPosition();local q=e:GetPosition()
+ local combat=e.replica and e.replica.combat
+ local radius=(combat and combat.GetAttackRangeWithWeapon and combat:GetAttackRangeWithWeapon() or 2)
+  +e:GetPhysicsRadius(0)+c.player:GetPhysicsRadius(0)+.5
+ self.knights=self.knights or {};local s=self.knights[e]
+ local early=anim(e,"atk") and frame(e)<16
+ if s and not early and p:DistSq(q)>=(radius+.3)^2 then self.knights[e]=nil;return end
+ if not s and early and p:DistSq(q)<=(radius+.5)^2 then s={};self.knights[e]=s end
+ if not s then return end
+ if self.knight_engaged then self.knight_engaged[e]=nil end
+ local dx,dz=p.x-q.x,p.z-q.z;local d=math.sqrt(dx*dx+dz*dz)
+ if d<.01 then dx,dz,d=0,1,1 end
+ s.point=Nav.Select(c,Vector3(q.x+dx/d*(radius+1),0,q.z+dz/d*(radius+1)),e)
+ return s
+end
+function Boss:Knight(e)
+ local s=self:KnightState(e)
+ self.knight_engaged=self.knight_engaged or {}
+ if s then self.knight_engaged[e]=nil;return self:Move(s.point,"骑士 · 完成躲避后再攻击",e) end
+ if not require("shadowself/control/targetpolicy").KnightOnly(self.c.bridge,e) then return end
+ if anim(e,"atk") and frame(e)<16 then self.c.bridge:PauseAttack();return "support",e end
+ if not self.knight_engaged[e] then
+  local p=self.c.player:GetPosition();local q=e:GetPosition();local d=dist(p,q)
+  local touch=e:GetPhysicsRadius(0)+self.c.player:GetPhysicsRadius(0)+.1
+  if d>touch+.15 then
+   return self:Move(Vector3(q.x+(p.x-q.x)/d*touch,0,q.z+(p.z-q.z)/d*touch),"骑士 · 贴至最近位置再连续攻击",e)
+  end
+  self.knight_engaged[e]=true
+ end
+ self:Release();return "attack",e
+end
+function Boss:KnightCommitted(e)
+ return e and self.knight_engaged and self.knight_engaged[e]
+  and require("shadowself/control/targetpolicy").KnightOnly(self.c.bridge,e) and not self:KnightState(e) or false
+end
+-- 同一出手帧可被索敌、禁攻及监督器多次观察，只计一次；两刀后锁到下一次真实冲撞。
+function Boss:RookObserve(target,s)
+ local c=self.c;local pa=rawanim(c.player);local f=frame(c.player);local attacking=c.player:HasTag("attack")
+ if attacking then
+  if not s.wasattack or s.pa~=pa or f<(s.pf or 0) then s.counted=nil end
+  local reach=(c.gear and c.gear.AttackRange and c.gear:AttackRange() or 2)+target:GetPhysicsRadius(0)
+  local plan=c.plan or c.bridge.plan
+  local inrange=not (plan and plan.arena) or c.h.ent==target and c.player:GetPosition():DistSq(target:GetPosition())<=reach^2
+  if s.ready and not s.counted and inrange
+   and c.h.IsHitingFrame and c.h:IsHitingFrame(0,target,true) then s.hits=s.hits+1;s.counted=true end
+ else s.counted=nil end
+ s.wasattack=attacking;s.pa=pa;s.pf=f
+ if s.ready and s.hits>=2 then s.ready=false;s.wait=true;if c.actions and c.actions.Stop then c.actions:Stop() end end
+ return s.wait
+end
 -- Rook recovery is a two-completed-swing budget, not two RPC requests.
 function Boss:Rook(target)
  if target.prefab~="rook" and target.prefab~="rook_nightmare" then return end
  local c=self.c;local s=self.rooks[target] or {hits=0};self.rooks[target]=s
  local charging=anim(target,"atk");local stopped=anim(target,"atk_skid") or anim(target,"atk_collide")
+ local endgame=require("shadowself/control/targetpolicy").ClockworkRook(c.bridge)==target
+ local preparing=anim(target,"atk_pre") or anim(target,"paw_loop")
+ if endgame and preparing then
+  if not s.wait and require("shadowself/control/arena_rook_window").Allow(c,target) then
+   s.ready=true;s.wait=nil;self:Release();return "attack",target
+  end
+  if c.rook_window and c.rook_window.target==target and c.rook_window.hits>=2 then s.wait=true end
+  s.ready=false
+ elseif endgame then c.rook_window=nil end
+ if charging then s.charged=true;s.hits=0;s.ready=false;s.wait=nil;s.wait_side=nil;s.wait_standing=nil end
+ -- 骑士躲避期间也持续确认战车收尾，不能因此丢失之后两刀的输出窗。
+ if stopped and (not s.stopped or s.charged) then
+  s.initialized=true;s.charged=nil;s.ready=true;s.hits=0;s.wait=nil
+ end
+ s.stopped=stopped
+ if endgame then
+  local goal,label=require("shadowself/control/arena_rook")(c,target,s,charging or preparing and not s.wait)
+  if goal then
+   if s.wall_wait then
+    c.bridge:PauseAttack();c.bridge.chasing=nil;c.travel.chasing=nil
+    if not s.wall_standing then c.actions:Stop();s.wall_standing=true end
+    c.status=label;return "support",target
+   end
+   s.wall_standing=nil
+   c.bridge.chasing=true;c.travel.chasing=true
+   return self:Move(goal,label,target)
+  end
+ end
  if charging then
   s.charged=true;s.hits=0;s.ready=false
   local p=c.player:GetPosition();local q=target:GetPosition();local r=target.Transform:GetRotation()*math.pi/180
@@ -43,36 +124,54 @@ function Boss:Rook(target)
   end
  end
  -- 只有实际看到冲刺收尾才能开输出窗；首次接管/普通待机不算初始化。
- if stopped and (not s.stopped or s.charged) then
-  s.initialized=true;s.charged=nil;s.ready=true;s.hits=0;s.wait=nil
- end
- s.stopped=stopped
- local pa=rawanim(c.player);local f=frame(c.player);local attacking=c.player:HasTag("attack")
- if attacking then
-  if not s.wasattack or s.pa~=pa or f<(s.pf or 0) then s.counted=nil end
-  -- Native player animation table supplies the actual impact frame.
-  if not s.counted and c.h.IsHitingFrame and c.h:IsHitingFrame(0,target,true) then s.hits=s.hits+1;s.counted=true end
- else s.counted=nil end
- s.wasattack=attacking;s.pa=pa;s.pf=f
- if s.ready and s.hits>=2 then
-  c.bridge:PauseAttack();c.actions:Stop();s.ready=false;s.wait=true
- end
+ if self:RookObserve(target,s) then c.bridge:PauseAttack() end
  if s.wait then
-  if charging then s.wait=nil else return self:Away(target,6,"战车 · 两刀后拉开，等下一次冲撞") end
+  if charging then s.wait=nil
+  elseif endgame then
+   local q=target:GetPosition();local pos=c.player:GetPosition();local angle=target.Transform:GetRotation()*math.pi/180
+   local nx,nz=math.sin(angle),math.cos(angle)
+   s.wait_side=s.wait_side or ((pos.x-q.x)*nx+(pos.z-q.z)*nz<0 and -1 or 1)
+   local goal=Vector3(q.x+nx*3.5*s.wait_side,0,q.z+nz*3.5*s.wait_side)
+   if pos:DistSq(goal)<.4^2 and Nav.Safe(c,goal,target) then
+    if not s.wait_standing then c.actions:Stop();s.wait_standing=true end
+    self:Release();return "support",target
+   end
+   s.wait_standing=nil;return self:Move(goal,"战车 · 两刀后侧旁待机，等下一次冲撞",target)
+  else return self:Away(target,6,"战车 · 两刀后游离身旁，等下一次冲撞") end
  end
- if not charging and not s.ready then return self:Away(target,6,"战车 · 等冲刺结束再开始输出") end
+ if not charging and not s.ready then return self:Away(target,endgame and 3.5 or 6,"战车 · 游离身旁，等冲刺结束再输出") end
  -- After the charge line no longer intersects us, native chase resumes immediately.
- if stopped then self:Release();return "attack",target end
+ if not charging and s.ready then self:Release();return "attack",target end
 end
 local function waking(e)
  local n=rawanim(e) or ""
  return n:find("tired_wakeup",1,true) or n:find("tired_pst",1,true)
 end
 function Boss:AttackBlocked(e)
+ if not require("shadowself/control/arena_rabbit").Allowed(self.c,e) then return true end
+ if self.c.plan and self.c.plan.arena_lunar12 and e and e:HasTag("NOCLICK") then return true end
+ local stage12=self.c.plan and self.c.plan.arena_stage12
+ if stage12 and not stage12:Allowed(e) then return true end
+ local stage=self.c.plan and self.c.plan.arena_stage11
+ if stage and not stage:Allowed(e) then return true end
+ if require("shadowself/control/boneguard").Ready(self.c) then return false end
+ if require("shadowself/control/arena_attackwindows").Block(self.c,e) then return true end
+ if require("shadowself/control/arena_windcycle").Blocked(self.c) then return true end
+ if not require("shadowself/control/arena_center").AttackAllowed(self.c,e) then return true end
+ if not require("shadowself/control/arena_swamp").Allowed(self.c,e) then return true end
+ if not require("shadowself/control/arena_salamanders").Allowed(self.c,e) then return true end
+ if require("shadowself/control/sharkroute").Block(self.c,e) then return true end
+ if require("shadowself/control/arena_moose").Block(self.c,e) then return true end
  if self.moon_hold then return true end
  if self.c.brightshade_target and not Plant.Weak(self.c.brightshade_target) then self.c.brightshade_target=nil end
  if self.c.brightshade_target and e~=self.c.brightshade_target then return true end
  if not e then return false end
+ if self:KnightState(e) then return true end
+ if require("shadowself/control/targetpolicy").KnightOnly(self.c.bridge,e) and not self:KnightCommitted(e) then return true end
+ local rook=require("shadowself/control/targetpolicy").ClockworkRook(self.c.bridge)
+ if rook and e~=rook then return true end
+ if rook==e and self.rooks[e] and not anim(e,"atk") and self:RookObserve(e,self.rooks[e]) then return true end
+ if rook==e and (anim(e,"atk_pre") or anim(e,"paw_loop")) then return not require("shadowself/control/arena_rook_window").Allow(self.c,e) end
  if (e.prefab=="rook" or e.prefab=="rook_nightmare") and (anim(e,"atk") or not (self.rooks[e] and self.rooks[e].ready)) then return true end
  if e.prefab=="mutatedbearger" and not require("shadowself/control/openings").Bear(self.c,e) then
   for _,zone in ipairs(self.c.hazards or {}) do if zone.bearger_pit and e:GetPosition():DistSq(zone.pos)<zone.radius^2 then return true end end
@@ -159,7 +258,11 @@ function Boss:Ignite(target,s)
   for _,e in ipairs(TheSim:FindEntities(pos.x,0,pos.z,10,{"_inventoryitem"},{"INLIMBO"})) do
    if e.prefab=="firestaff" and e:IsValid() and Nav.Safe(c,e:GetPosition(),target) then
     c.bridge:PauseAttack()
-    if not p.components.playercontroller:IsBusy() and now>=(s.nextpickup or 0) then A.Scene(p,e,ACTIONS.PICKUP);s.nextpickup=now+.6 end
+    if not p.components.playercontroller:IsBusy() and now>=(s.nextpickup or 0) then
+     local wave=c.plan and c.plan.arena and c.plan.arena_wave and c.plan.arena_wave() or 1
+     if not require("shadowself/control/arena_pickup_travel").Ready(s,p,wave,e,c) then return "support",target end
+     A.Scene(p,e,ACTIONS.PICKUP);s.nextpickup=now+.6
+    end
     return "support",target
    end
   end
@@ -455,6 +558,46 @@ function Boss:Bearger(target)
 end
 function Boss:Tick(target)
  local c=self.c;local p=c.player:GetPosition()
+ -- 外圈巡游/返回加速地皮不能覆盖已经起手的真实扑击、挥击。
+ local windows=require("shadowself/control/arena_attackwindows");local immediate
+ for _,e in ipairs(c.enemies or {}) do
+  if e:IsValid() and windows.Block(c,e) and p:DistSq(e:GetPosition())<=12^2
+   and (not immediate or p:DistSq(e:GetPosition())<p:DistSq(immediate:GetPosition())) then immediate=e end
+ end
+ if immediate then
+  if immediate.prefab=="slurper" then
+   -- 远处啜食者起手仍交给侧方威胁扫描，不能因此抢走近处的反击目标。
+   immediate=require("shadowself/control/arena_slurper").Nearest(c,c.enemies,nil,target) or immediate
+  end
+  local pack=c.arena_snailpack
+  if pack and pack.active and immediate.prefab=="slurper" and pack.target~=immediate then
+   pack.target=immediate;pack.phase=windows.Committed(c,immediate) and "fight" or "bait";pack.bait_seen=nil;pack.standing=nil
+  end
+  if pack and pack.target==immediate and pack.phase=="bait" then pack.bait_seen=true end
+  self:Release();return "attack",self:Select(immediate)
+ end
+ local center_mode,center_target=require("shadowself/control/arena_center").Tick(self,target)
+ if center_mode then return center_mode,center_target end
+ if c.plan and c.plan.arena and c.plan.arena_wave and (c.plan.arena_wave()==5 or c.plan.arena_wave()==6) then
+  self.snailpack=self.snailpack or require("shadowself/control/arena_snailpack")(self)
+  local mode,picked=self.snailpack:Tick()
+  if mode then return mode,picked end
+ end
+ local bat_mode,bat_target=require("shadowself/control/arena_bats").Tick(self,target)
+ if bat_mode then return bat_mode,bat_target end
+ if c.encounters and c.encounters.Patrol then
+  local mode,picked=c.encounters:Patrol(target)
+  if mode then return mode,picked end
+ elseif c.encounters and c.encounters.Salamanders then
+  local mode,picked=c.encounters:Salamanders()
+  if mode then return mode,picked end
+ end
+ local shark_mode,shark_target=require("shadowself/control/sharkroute").Prepare(self,target)
+ if shark_mode then return shark_mode,shark_target end
+ local ant_mode,ant_target=self.routes:AntRecover(target)
+ if ant_mode then return ant_mode,ant_target end
+ local knight_mode,knight_target=self:Knight(target)
+ if knight_mode then return knight_mode,knight_target end
  if self.bear_weapon and target.prefab~="mutatedbearger" then
   if c.gear.forced_weapon==self.bear_weapon then c.gear.forced_weapon=nil end;self.bear_weapon=nil
  end
@@ -466,6 +609,11 @@ function Boss:Tick(target)
   local mode,picked=self:Brightshade(target);if mode then return mode,picked end
  end
  if self.routes:Leap(target) then self:Release();return "attack",target end
+ local clockwork_rook=require("shadowself/control/targetpolicy").ClockworkRook(c.bridge)
+ if clockwork_rook then
+  local mode,picked=self:Rook(clockwork_rook)
+  if mode then return mode,picked end
+ end
  if #c.enemies>=2 and Nav.Clearance(c,p)<5 then
   local best,score
   for i=0,15 do
@@ -489,10 +637,28 @@ function Boss:Tick(target)
 end
 local profiles={
  vault_pillar_guard={atk_1={29,5.9},atk_2={26,5.9},atk_3_pre_a={1000,6},atk_3_pre_b={1000,6},atk_3={1000,6},spin_pre={1000,6.6},spin_loop={1000,6.6}},
- primemate={atk={9,3.5},atk_weapon={9,4}},
+ prime_mate={atk={9,3.5},atk_weapon={9,4}},
  sharkboi={atk1={16,5},atk2={4,5},atk2_delay={1000,5},atk3={12,5},ice_summon={42,6},torpedo_pre={1000,6},torpedo_jump={1000,6},torpedo_loop={1000,6},icedive_standing_jump_pre={1000,5},icedive_jump_pre={1000,5},icedive_jump={1000,5},icedive_dig_pre={1000,5},icedive_dig_pst={4,5}}
 }
 function Boss:Dodge(target,base)
+ local window=require("shadowself/control/arena_attackwindows").Dodge(self.c,target,base)
+ if window~=base then return window end
+ local bat=require("shadowself/control/arena_bats").Dodge(self.c,target,base)
+ if bat~=base then return bat end
+ local snail=require("shadowself/control/arena_snails").Dodge(self.c,target,base)
+ if snail~=base then return snail end
+ if require("shadowself/control/arena_rabbit").Ignore(self.c,target) then return false end
+ local lunar=require("shadowself/control/arena_lunar12").Dodge(self.c,target,base)
+ if lunar~=base then return lunar end
+ local moose=require("shadowself/control/arena_moose").Dodge(self.c,target,base)
+ if moose~=base or target and target.prefab=="moose" and self.c.plan and self.c.plan.arena
+  and self.c.plan.arena_wave and self.c.plan.arena_wave()==4 then return moose end
+ local knight=self:KnightState(target)
+ if knight then
+  return {atkanim="atk",point="player",dist=4,update=true,exclusive=true,noattack=true,
+   fn=function() local s=self:KnightState(target);return s and s.point or self.c.player:GetPosition() end,
+   breakdodgefn=function() return not self:KnightState(target) end}
+ end
  if self:HoldPosition(target) then return false end
  if target.prefab=="minotaur" then
   local data=require("shadowself/control/guardian").Dodge(self.c,target,base);if data~=base then return data end

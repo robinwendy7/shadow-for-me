@@ -126,6 +126,7 @@ end]====]
 local file=assert(io.open("scripts/shadowself/native/engine/HitAndRun.lua"));local source=file:read("*a");file:close()
 local a=assert(source:find("do --走向和攻击函数",1,true));local z=assert(source:find("\ndo --功能性函数",a,true))
 local restored=source:sub(a,z-1)
+local oldClock=GetTime;local clock=0;GetTime=function() return clock end
 local function run(src,locomote,distance)
  local calls={};local H={pos=Vector3(0,0,0),ppos=Vector3(distance,0,0),isserver=false}
  local foe={GetPosition=function() return H.pos end};H.ent=foe
@@ -143,6 +144,7 @@ local function run(src,locomote,distance)
   SendRPCToServer=function(...) calls[#calls+1]={...} end},{__index=_G})
  local f=assert(loadstring(src));setfenv(f,env);f()
  H:PredictWalkTo(H.ppos,H.pos,-.3,3,foe,true)
+ clock=clock+.3 -- compare complete protocols outside the repeat window
  H:WalkTo(H.ppos,H.pos,-.3,3,foe,true)
  return calls
 end
@@ -158,3 +160,5 @@ end
 local c=assert(io.open("scripts/shadowself/control/combat.lua")):read("*a")
 assert(not c:find("shadowself_backstep",1,true),"normal attack retreat is no longer rewritten by the secondary navigation filter")
 print("PASS: restored movement matches actual 3014 calls at inner/max/outside reach, both remote movement modes; no secondary rewrite")
+
+GetTime=oldClock

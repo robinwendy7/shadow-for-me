@@ -27,7 +27,7 @@ function p:HasTag(t) return self.tags[t] or false end
 function p:GetPosition() return Vector3(0,0,0) end
 local task=require('shadowself/control/arena')(p,{loop=true})
 task.NearbyEnemies=function() return {} end
-task.Entities=function() return {{IsValid=function() return true end,GetPosition=function() return Vector3(2,0,0) end}},{} end
+task.Entities=function() return {{prefab='hound',HasTag=function() return false end,IsValid=function() return true end,GetPosition=function() return Vector3(2,0,0) end}},{} end
 task.Loot=function() return false end;task.Equip=function() return false end
 assert(task:Tick()=='running' and prepares==1 and starts==0,'no combat before server-confirmed arena instance')
 snapshot={state={},instance='one',generation=1,kind='PARTICIPANT',arena=true,wave=1,route='default'}

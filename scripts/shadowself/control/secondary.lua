@@ -5,19 +5,39 @@ local Secondary=Class(function(self,c)
     self.c=c;self.cache={};self.enemies={};self.observed={};self.hazards={}
     self.player=c.player;self.actions=c.actions
 end)
+function Secondary:Focus()
+ local bird=require("shadowself/control/targetpolicy").Bird(self.c.bridge)
+ if bird and self.c.plan and self.c.plan.arena_bird_committed and self.c.plan.arena_bird_committed(bird) then return bird end
+ local hunt=self.c.plan and self.c.plan.arena_walrus
+ if hunt and hunt.Committed and hunt:Committed(hunt.target) then return hunt.target end
+ local r=self.c.plan and self.c.plan.arena_clockwork
+ return r and r:Live() and r.target or nil
+end
 function Secondary:Scan()
     local now=GetTime()
     self.hazards=self.c.hazards or {}
     if now<(self.next_scan or 0) then return end
     self.next_scan=now+.05;self.enemies={};self.observed={};self.data={}
+    local previous=self.motion or {};self.motion={}
     local c=self.c;local p=self.player:GetPosition()
-    local old=c.bridge.wrappers.IsAttackPre.old
+    local old=c.bridge.wrappers.IsAttackPre.old;local focus=self:Focus()
     for _,e in ipairs(TheSim:FindEntities(p.x,p.y,p.z,18,nil,{"INLIMBO","FX","DECOR","isdead"})) do
-        if (c.bridge.allowed(e) or e.prefab=="crabking_mob" or e.prefab=="crabking_mob_knight" or e:HasTag("lunarthrall_plant_end") or e:HasTag("lunarthrall_plant_segment")) and not e:HasTag("sleeping") and not require("shadowself/control/status").Frozen(e) then
+        if not require("shadowself/control/arena_rabbit").Ignore(c,e) and (not focus or e==focus) and (c.bridge.allowed(e) or e.prefab=="crabking_mob" or e.prefab=="crabking_mob_knight" or e:HasTag("lunarthrall_plant_end") or e:HasTag("lunarthrall_plant_segment")) and not e:HasTag("sleeping") and not require("shadowself/control/status").Frozen(e) then
+            if c.plan and c.plan.arena then
+                local q=e:GetPosition();local last=previous[e];local vx,vz=0,0
+                local dt=last and now-last.time
+                -- 同步挤推也参与预测；传送和长时间失去观测不能当成奔跑速度。
+                if dt and dt>0 and dt<=.25 then
+                    local dx,dz=q.x-last.x,q.z-last.z
+                    if dx*dx+dz*dz<=(16*dt)^2 then vx,vz=dx/dt,dz/dt end
+                end
+                self.motion[e]={x=q.x,z=q.z,time=now,vx=vx,vz=vz}
+            end
             local idle=c.h.idle_ticks;local data=old(c.h,e,0);c.h.idle_ticks=idle
             if e.prefab=="sharkboi" and c.mechanisms then data=c.mechanisms:Dodge(e,data) end
             if c.encounters then data=c.encounters:Dodge(e,data) end
             if c.bosses then data=c.bosses:Dodge(e,data) end
+            if require("shadowself/control/arena_rook_window").Allow(c,e) then data=nil end
             -- Exclude idle fallback entries: only the animation it describes is real danger.
             local anim=data and data.atkanim
             if type(anim)=="function" then anim=anim(e) end
@@ -27,11 +47,15 @@ function Secondary:Scan()
             elseif e.prefab=="rook" or e.prefab=="rook_nightmare" or e.prefab=="knight" or e.prefab=="knight_nightmare" or e.prefab=="bishop" or e.prefab=="bishop_nightmare" then
                 -- 发条即使尚未挥击，走位也不要钻进它的近身攻击圈。
                 self.enemies[#self.enemies+1]=e;self.observed[e.GUID]={neutral=false}
+            elseif c.plan and c.plan.arena then
+                -- 待机群怪同样会挤住退路，但不因此冒充正在攻击的伤害来源。
+                self.enemies[#self.enemies+1]=e;self.observed[e.GUID]={neutral=true}
             end
         end
     end
 end
 function Secondary:Danger(primary)
+    if self:Focus() then return nil end
     self:Scan()
     local p=self.player:GetPosition();local best,score
     for _,e in ipairs(self.enemies) do
@@ -52,10 +76,15 @@ end
 -- 角斗场第三关的主教优先是持续输出目标；其他单位仅临时借作原生闪避目标。
 function Secondary:Preferred()
  local c=self.c;local e=c.bridge.priority_target
- if c.plan and c.plan.arena and e and (e.prefab=="bishop" or e.prefab=="bishop_nightmare")
+ local bird=require("shadowself/control/targetpolicy").Bird(c.bridge)
+ if bird then return bird end
+ local rook=require("shadowself/control/targetpolicy").ClockworkRook(c.bridge)
+ if rook then return rook end
+ if c.plan and c.plan.arena and e
   and e:IsValid() and c.bridge.allowed(e) then return e end
 end
 function Secondary:Pulse()
+    if require("shadowself/control/boneguard").Ready(self.c) then self.pending=nil;return end
     if self.c.queen_active and self.c.beequeen and self.c.beequeen.late then self.pending=nil;return end
     local c=self.c;local primary=c.h.ent
     if not primary then return end
@@ -114,6 +143,7 @@ function Secondary:Point(point,primary,accept)
     return not self:LaneBlocked(fallback,primary) and (not accept or accept(fallback)) and fallback or p
 end
 function Secondary:Wrap(primary,data,checktab)
+    if require("shadowself/control/boneguard").Ready(self.c) then self.pending=nil;return false end
     if primary and primary.prefab=="shadowthrall_hands" then return data end
     if data and data.exclusive and primary.prefab~="bishop" and primary.prefab~="bishop_nightmare" and primary.prefab~="sharkboi" and primary.prefab~="daywalker" and primary.prefab~="rook" and primary.prefab~="rook_nightmare" then return data end
     if self.c.queen_active and self.c.beequeen and self.c.beequeen.late then self.pending=nil;return data end
@@ -155,6 +185,13 @@ function Secondary:AfterDodge(captured)
  return captured
 end
 function Secondary:BeforeAttack(check_only)
+    if require("shadowself/control/boneguard").Ready(self.c) then self.pending=nil;return true end
+    local focus=self:Focus()
+    if focus then
+        self.pending=nil
+        if self.c.h.ent~=focus then self:Select(focus);return false end
+        return true
+    end
     if self.c.queen_active and self.c.beequeen and self.c.beequeen.late then self.pending=nil;return true end
     local preferred=self.c.brightshade_target
     if preferred and not require("shadowself/control/plant").Weak(preferred) then self.c.brightshade_target=nil;preferred=nil end

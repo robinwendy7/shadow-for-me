@@ -126,6 +126,16 @@ worn=armor;now=now+.1
 assert(task:Loot({food},true) and picked==food,'confirmed armor equip releases next supply pickup')
 assert(not Inventory.Discard({armor},player,3),'currently worn armor remains protected')
 print('PASS: armor pickup equips before more loot, delayed equip confirmation blocks competing actions, worn armor retained')
+-- 第八关必须从同一个首次确认tick进入船流程，不让旧猫鞭/普通补给/开局绕行先执行。
+local launched=0
+task.encounters.Tick=function() launched=launched+1;return 'hold' end
+task.opening.Tick=function() error('wave8 cannot wait behind a regular opener') end
+task.Loot=function() error('wave8 cannot wait behind ordinary loot') end
+task.Prune=function() error('wave8 cannot wait behind ordinary pruning') end
+task.Entities=function() return {},{} end
+task.whip.finished=true;owned={drop('whip',100008)}
+snapshot.wave=8;now=now+1
+assert(task:Tick()=='running' and launched==1 and not task.next_item and #task.fire_zones==0,'first authoritative wave8 update immediately dispatches boat encounter without prior-wave loot delay or stale floor hazards')
 Inventory.Priority=priority
 for _,k in ipairs(keys) do package.loaded[k]=saved[k] end
 GetTime=oldTime;TheSim=oldSim;TheWorld=oldWorld

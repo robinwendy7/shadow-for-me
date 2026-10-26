@@ -1,4 +1,4 @@
-local keys={'shadowself/control/actions','shadowself/control/arena_tools','shadowself/control/arena_hunts','shadowself/control/arena_goats','shadowself/control/navigation'}
+local keys={'shadowself/control/actions','shadowself/control/arena_tools','shadowself/control/arena_hunts','shadowself/control/arena_goats','shadowself/control/navigation','shadowself/control/arena_pirates'}
 local saved={};for _,k in ipairs(keys) do saved[k]=package.loaded[k] end
 local oldTime=GetTime;local now=0;GetTime=function() return now end
 local function ent(name,x)
@@ -36,15 +36,9 @@ bag={empty};ground={spare};now=5
 assert(Tools.Recover(c,'panflute') and drops==1 and picks==0,'spent flute removed before replacement pickup')
 bag={};now=6;assert(Tools.Recover(c,'panflute') and picked==spare and picks==1,'unowned ground flute replenishes after exhaustion')
 spare.held=true;bag={spare};assert(not Tools.Recover(c,'panflute') and picks==1,'authoritative inventory ownership prevents duplicate pickup')
-local captain=ent('primemate',1);local monkey=ent('powdermonkey',5)
-c.enemies={captain,monkey};mode,target=hunts:Tick(captain)
-assert(mode=='support' and target==monkey and #castTargets==1 and attacks==0,'even final powdermonkey stays on tornado path before captain')
-c.enemies={captain};local torch=ent('torch');bag={torch};now=10
-assert(hunts:Tick(captain)=='support' and attacks==1,'captain receives torch attack after all powdermonkeys die')
-now=10.1;hunts:Tick(captain);assert(attacks==1,'wait for ignition replication rather than spam hits')
-captain.tags.fire=true;hand=torch
-assert(hunts:Tick(captain)=='support','burning captain waits for actual normal weapon equip')
-hand=sword;mode,target=hunts:Tick(captain);assert(mode=='attack' and target==captain and attacks==1,'confirmed fire/fear switches to normal weapon damage')
-captain.tags.fire=nil;assert(hunts:Tick(captain)=='attack' and attacks==1,'do not oscillate torch and weapon after ignition')
+local captain=ent('prime_mate',1);local monkey=ent('powder_monkey',5)
+package.loaded['shadowself/control/arena_pirates']=function(owner) return {Tick=function(_,entities) assert(entities[1]==captain and entities[2]==monkey);return 'move',monkey end} end
+c.enemies={captain,monkey};local mode,target=hunts:Tick(captain)
+assert(mode=='move' and target==monkey and attacks==0,'pirates use the dedicated wave policy without the old torch opener')
 for _,k in ipairs(keys) do package.loaded[k]=saved[k] end;GetTime=oldTime
-print('PASS: last fleeing little walrus flute/ack; spent flute replacement and pickup ownership; tornado powdermonkey priority through final add; captain torch ignition then confirmed weapon return')
+print('PASS: last fleeing little walrus flute/ack; spent flute replacement and pickup ownership; pirates delegate to the dedicated wave policy')

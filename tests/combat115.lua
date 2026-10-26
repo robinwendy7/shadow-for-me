@@ -30,7 +30,7 @@ c.mechanisms={Equip=function(_,item) held.hands=item;return true end}
 package.loaded["shadowself/control/bosses"]=nil
 local Boss=require("shadowself/control/bosses");local b=Boss(c);c.bosses=b
 -- Completed swings count, not issued attack requests. Exactly two then retreat.
-local rook=entity("rook");c.enemies={rook};rook.anim="atk";b:Tick(rook)
+local rook=entity("rook");c.h.ent=rook;c.enemies={rook};rook.anim="atk";b:Tick(rook)
 p.pos=Vector3(1,0,3);assert(b:Tick(rook)=="move" and c.moved.x<rook.pos.x and c.bridge.chasing,"clear lane immediately follows the rear using the move owner")
 p.pos=Vector3(2,0,0);rook.anim="atk_skid";b:Tick(rook)
 for i=1,2 do
@@ -61,7 +61,7 @@ shark.anim="icedive_dig_loop";assert(not b:Dodge(shark,false),"exposed tail is a
 local tower=entity("vault_pillar_guard")
 for _,name in ipairs({"atk_1","atk_2","atk_3_pre_a","atk_3_pre_b","atk_3","spin_pre","spin_loop"}) do tower.anim=name;tower.frame=0;assert(b:Dodge(tower,false),name) end
 tower.anim="stunned_loop";assert(not b:Dodge(tower,false),"stagger is a punish window")
-local mate=entity("primemate");mate.anim="atk_weapon";mate.frame=8;assert(b:Dodge(mate,false));mate.frame=9;assert(not b:Dodge(mate,false))
+local mate=entity("prime_mate");mate.anim="atk_weapon";mate.frame=8;assert(b:Dodge(mate,false));mate.frame=9;assert(not b:Dodge(mate,false))
 -- Crystal second throw is identified by source animation, not guessed elapsed battle time.
 local deer=entity("mutateddeerclops");c.enemies={deer};p.pos=Vector3(8,0,0);deer.anim="idle_loop";assert(b:Tick(deer)=="move" and c.moved.x>=8,"bait lances before attacking the armoured body")
 deer.anim="throw";deer.frame=30

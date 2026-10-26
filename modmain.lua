@@ -5,6 +5,7 @@ local QueenDebug=require("shadowself/control/queendebug")
 G.print("[ShadowSelf] "..QueenDebug.VERSION.." loaded: embedded combat")
 require("shadowself/native").Init(MODROOT)
 local options = {
+    bone_refuel = GetModConfigData("bone_refuel") or 25,
     speech_color = GetModConfigData("speech_color") or "red",
     speech_voice = GetModConfigData("speech_voice") ~= false,
     leash = GetModConfigData("leash") or 15,

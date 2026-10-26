@@ -1,5 +1,6 @@
 -- 联机实际移动入口回归：原版DoAction busy拒绝之前必须发出合法预测会话。
 local oldPlayer,oldRPC,oldActions,oldBuffered=ThePlayer,RPC,ACTIONS,BufferedAction
+local oldTime=GetTime;local now=0;GetTime=function() return now end
 local calls={};local busy=true;local attempted=0;local platform={}
 local pc={ismastersim=false,locomotor={}}
 function pc:CanLocomote() return true end;function pc:IsBusy() return busy end
@@ -22,15 +23,17 @@ H:StopPredictWalk();assert(calls[2][1]==101 and calls[2][9]==true and calls[3][1
 -- Ordinary recovery must retain the original input sequence, not emergency prediction.
 busy=false;ThePlayer.replica={inventory={GetActiveItem=function() end}}
 H.PC=pc;H.ppos=Vector3(0,0,0);H.pos=Vector3(1,0,0)
-H:WalkTo(Vector3(0,0,0),Vector3(1,0,0),-.3)
+now=now+.3;H:WalkTo(Vector3(0,0,0),Vector3(1,0,0),-.3)
 assert(attempted==1 and #calls==3,"ordinary locomotor recovery uses original DoAction only")
-H:_PredictWalk(Vector3(-.3,0,0))
+now=now+.3;H:_PredictWalk(Vector3(-.3,0,0))
 assert(#calls==6 and calls[4][1]==101 and calls[4][2]==-.3 and calls[5][1]==103 and calls[6][1]==101,
     "original PredictWalking / LeftClick WALKTO / PredictWalking order")
 assert(not H.shadowself_predicting,"ordinary recovery must not start emergency prediction sessions")
-H:PredictWalk(Vector3(0,0,0),Vector3(1,0,0),{GetPosition=function() return Vector3(1,0,0) end})
+now=now+.3;H:PredictWalk(Vector3(0,0,0),Vector3(1,0,0),{GetPosition=function() return Vector3(1,0,0) end})
 assert(attempted==2 and #calls==6,"at reach boundary restore original local recovery instead of extra outward .15 step")
 local actual=read_source("components/playercontroller.lua")
 assert(actual:find('elseif self:IsBusy() then',1,true) and actual:find('if isstart then',1,true) and actual:find('RestartPredictMoveTimer()',1,true))
 ThePlayer,RPC,ACTIONS,BufferedAction=oldPlayer,oldRPC,oldActions,oldBuffered
 print("PASS: emergency movement remains busy-safe; ordinary recovery restores original action sequence and boundary behavior")
+
+GetTime=oldTime

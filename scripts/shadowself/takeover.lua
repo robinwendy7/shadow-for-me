@@ -31,8 +31,8 @@ function Takeover:AskPlan(plan,text)
     if self.phase and self.phase~="active" then self:Say("等覆盖完成。也可以说取消。");return true end
     if self.phase=="active" then self:EndBattle();self.jobs:Cancel();self.combat:Stop();Actions.Stop(self.r.owner);self.task=nil end
     self.last_request=text;self.pending={plan=plan,until_time=math.huge}
-    self:Speak("permission",{task=plan.label});self:Say("回复“同意接管”，或点人物脚下的“同意接管”。")
-    if self.r.speech then self.r.speech:Pin("需要我帮你"..plan.label.."的话，点同意接管。") end
+    self:Speak("permission",{task=plan.label});self:Say("回复“同意接管”，或点护甲槽上方的接管按钮确认。")
+    if self.r.speech then self.r.speech:Pin("需要我帮你"..plan.label.."的话，点护甲槽上方的接管按钮确认。") end
     return true
 end
 function Takeover:HandleCook(text)
@@ -48,13 +48,24 @@ function Takeover:HandleCook(text)
     if why then self:Say(why);return true end
     return false
 end
+-- 角斗场不能只启动普通走A，否则不会执行本关拾取、换装与专属流程。
+-- 仅凭服务器同步的参赛者HUD识别，不因附近有怪就自动开启角斗场。
+function Takeover:CombatPlan()
+    local adapter=require("shadowself/control/arena_adapter")(self.r.owner)
+    local snapshot=adapter:Snapshot()
+    if snapshot and snapshot.arena and snapshot.instance and snapshot.kind=="PARTICIPANT" then
+        return {kind="arena",loop=true,label="经典单人角斗场循环",text="接管当前角斗场"}
+    end
+    return {kind="fight",target="",label="战斗接管"}
+end
 function Takeover:OfferCombat()
     if self.phase or self.pending or self.r.dead then return false end
     if not self.combat:Available() then return false end
-    self.pending={plan={kind="fight",target="",defensive=true,label="接手战斗"},until_time=math.huge}
+    local plan=self:CombatPlan();plan.defensive=true
+    self.pending={plan=plan,until_time=math.huge}
     local queue={};for _,e in ipairs(self.r.queue or {}) do if e.kind~="hurt" then queue[#queue+1]=e end end;self.r.queue=queue
-    self:Say("亲爱的我，你又受伤了，需要我帮忙的话点同意接管。")
-    if self.r.speech then self.r.speech:Pin("亲爱的我，你又受伤了，需要我帮忙的话点同意接管。") end
+    self:Say("亲爱的我，你又受伤了，需要我帮忙的话点护甲槽上方的接管按钮。")
+    if self.r.speech then self.r.speech:Pin("亲爱的我，你又受伤了，需要我帮忙的话点护甲槽上方的接管按钮。") end
     return true
 end
 function Takeover:CanStart(plan)
@@ -111,11 +122,12 @@ function Takeover:HandleText(text)
 end
 -- Clicking the combat HUD button is explicit consent; preserve covering animation.
 function Takeover:CombatButton()
+    if self.pending then return self:HandleText("同意接管") end
     if self.phase then self:Stop(nil);self:Speak("stop");return end
-    local plan={kind="fight",target="",label="战斗接管"}
+    local plan=self:CombatPlan()
     local ok,why=self:CanStart(plan)
     if not ok then self:Say(why);return end
-    self.last_request="帮我自动战斗"
+    self.last_request=plan.kind=="arena" and "自动角斗场循环" or "帮我自动战斗"
     self.pending={plan=plan,until_time=math.huge}
     return self:HandleText("同意接管")
 end

@@ -1,5 +1,6 @@
 -- 真正动作模块的预演回调与主机分支；不发送真实网络数据。
 package.loaded["shadowself/control/actions"]=nil
+local oldTime=GetTime;local now=0;GetTime=function() return now end
 local A=require("shadowself/control/actions")
 local calls={}
 SendRPCToServer=function(...) calls[#calls+1]={...} end
@@ -30,13 +31,13 @@ local done=true
 local pot={IsValid=function() return true end,HasTag=function(_,tag) return tag=="donecooking" and done end,GetPosition=target.GetPosition}
 assert(not A.Scene(player,pot,harvest),"mouse picker has another preferred action")
 local before=#calls
-allowed=true
+allowed=true;now=now+.5
 assert(A.HarvestCooked(player,pot,function() return allowed end))
 assert(pc.action.action==harvest and #calls==before,"explicit harvest still waits for native preview")
 pc.action.preview_cb();assert(#calls==before+1 and calls[#calls][2]==harvest.code)
 done=false;pc.action.preview_cb();assert(#calls==before+1,"empty pot invalidates stale harvest callback")
 assert(not A.HarvestCooked(player,pot),"never harvest a pot still cooking or already empty")
-done=true;pc.locomotor=nil
+done=true;pc.locomotor=nil;now=now+.5
 assert(A.HarvestCooked(player,pot));assert(pc.action.non_preview_cb)
 pc.action.non_preview_cb();assert(#calls==before+2,"harvest works with prediction disabled")
 pc.locomotor={};pc.ismastersim=true
@@ -83,3 +84,5 @@ owner.name="wendy_resurrect";owner.length=172/30;owner.time=86/30
 local w=Clock(owner,"wendy_resurrect")
 assert(math.abs(w:Pose(w:Progress())-86/30)<.001,"original Wendy timeline remains aligned")
 print("PASS: native action callbacks, revoked callback, authoritative crafting and synchronized rebirth timelines")
+
+GetTime=oldTime

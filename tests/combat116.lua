@@ -34,10 +34,11 @@ c.Latency=function() return .1 end;c.Speed=function() return 6 end
 -- A single circular-direction sidestep ends; a blocked arc reverses direction.
 local ant=entity("antlion");ant.anim="cast_pre";c.enemies={ant};c.h.ent=ant;p.pos=Vector3(3,0,0)
 local data=b:Dodge(ant,false);assert(data.exclusive and data.noattack)
-local step=data:fn();assert(step.x>=3 and step:DistSq(p.pos)<=2.25^2,"short tangent cannot chord through boss body");p.pos=step
+local step=data:fn();assert(math.abs(math.sqrt(step:DistSq(ant.pos))-3)<.01 and step:DistSq(p.pos)<1.1^2,"circular waypoint retains radius and cannot chord through boss body");p.pos=step
+for i=1,20 do local next=b:Dodge(ant,false);if not next then break end;p.pos=next:fn() end
 assert(not b:Dodge(ant,false),"one safe sidestep ends the dodge and permits damage")
 p.pos=Vector3(3,0,0);b.routes.sides[ant]=1;c.hazards={{pos=Vector3(3*math.cos(.5),0,3*math.sin(.5)),radius=1.2}}
-b.routes.antlion=nil;data=b:Dodge(ant,false);local q=data:fn();assert(q.z<0 and q.x>=3 and q:DistSq(p.pos)<=2.25^2)
+b.routes.antlion=nil;data=b:Dodge(ant,false);local q=data:fn();assert(q.z<0 and math.abs(math.sqrt(q:DistSq(ant.pos))-3)<.01 and q:DistSq(p.pos)<1.1^2)
 c.hazards={}
 local pig=entity("daywalker");pig.anim="run_loop";local original={dist=8};assert(b:Dodge(pig,original)==original,"daywalker passes native table through unchanged")
 pig.anim="atk3";local old={dist=5};assert(b:Dodge(pig,old)==old,"pounce uses native table without custom lateral override")

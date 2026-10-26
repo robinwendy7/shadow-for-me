@@ -16,7 +16,7 @@ assert(not I.BelowArmorFloor(wood,8) and not I.BelowArmorFloor(football,8),'80 p
 assert(I.BelowArmorFloor(grass,8) and I.BelowArmorFloor(cutter,8),'60 percent grass and 70 percent cutter cleared before crab')
 assert(I.Cleanup({cutter},p,7,true)==cutter,'wave7 clear drops low armor before ocean begins')
 assert(I.BelowArmorFloor(wood,11) and not I.BelowArmorFloor(ruins,11) and not I.BelowArmorFloor(ruinshat,11) and not I.BelowArmorFloor(bone,11),'after dragon retain 90 percent ruins and bone armor; drop wood')
-assert(I.Cleanup({wood},p,10,true)==wood and not I.Cleanup({wood},p,10,false),'90 percent threshold starts at dragon completion, not mid-fight')
+assert(I.Cleanup({football},p,10,true)==football and not I.Cleanup({football},p,10,false),'90 percent threshold starts at dragon completion, not mid-fight')
 local oldWorld,oldTime=TheWorld,GetTime;GetTime=function() return 0 end
 local map={GetTileCenterPoint=function() return 20,0,0 end,IsOceanAtPoint=function(_,x,_,z) return math.abs(x)<=12 and math.abs(z)<=12 end,IsPassableAtPoint=function() return true end}
 TheWorld={Map=map}

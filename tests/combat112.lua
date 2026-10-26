@@ -37,13 +37,19 @@ local spore=ent("spore_moon",2,0);spore.anim="rumble";entities={spore}
 m:Scan();assert(#m.zones==0,"not all idle spores cause endless fleeing")
 now=.4;m:Scan();assert(#m.zones==1 and m:Escape() and c.moved,"move before timed spore explosion")
 spore.anim="idle_flight_loop";m:Scan();assert(#m.zones==0)
+spore.anim="explode";spore.frame=3;m:Scan();assert(#m.zones==1,"spore remains dangerous before explosion damage frame")
+spore.frame=4;m:Scan();assert(#m.zones==0 and not m:Escape(),"after the explosion hit frame the spore releases movement control")
+local gnome=ent("mushgnome",8,0)
+gnome.replica.combat={GetAttackRangeWithWeapon=function() return 15 end}
+assert(require("shadowself/control/navigation").Radius(gnome)==1.2,"proactive spore trigger range is not a body damage radius")
 local spike=ent("sandspike_tall",.5,0);spike.anim="tall_pre";entities={spike}
 m:Scan();assert(#m.zones==1,"visible spike is a route obstacle before its damage frame");spike.frame=24;m:Scan();assert(#m.zones==1 and m:Escape(),"sand spike escapes during pre-animation")
 local wall=ent("sandblock",8,0);entities={wall};m:Scan();assert(wall.colour[4]==0);m:Stop();assert(wall.colour[4]==1,"sand wall visuals restore; collision entity is not removed")
 local shark=ent("sharkboi",0,0);shark.anim="atk1";p.pos=Vector3(3,0,0)
 local dodge=m:Dodge(shark,false);assert(dodge and dodge.fn)
 local point=dodge:fn();assert(point.z~=0 and point:DistSq(shark.pos)>=(shark:GetPhysicsRadius(0)+p:GetPhysicsRadius(0))^2 and point:DistSq(shark.pos)<=2.5^2+.001,"shark route keeps physical clearance while using a tighter orbit")
-shark.frame=17;assert(m:Dodge(shark,false)==false,"shark hit window ends and allows attack")
+shark.frame=17;assert(m:Dodge(shark,false),"hit frame alone cannot stop an incomplete rear orbit")
+p.pos=Vector3(-2,0,0);assert(m:Dodge(shark,false)==false,"actual rear arrival restores attack")
 local function item(name,slot)
  local i=ent(name);i.replica.equippable={EquipSlot=function() return slot end,IsRestricted=function() return false end};return i
 end

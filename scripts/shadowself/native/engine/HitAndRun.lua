@@ -148,11 +148,13 @@ function HitAndRun:GetClosestTarget()
 end
 
 do --走向和攻击函数
+    local Throttle=require("shadowself/control/rpc_throttle")
 	local function doPredictwalk(x, z)
 		SendRPCToServer(RPC.PredictWalking, x, z)
 	end
     -- 仅紧急躲避使用完整预测会话；普通走A使用下方3014原版入口。
     local function emergencywalk(x,z)
+        if not Throttle.Move(ThePlayer,Vector3(x,0,z)) then return false end
         local pc=ThePlayer.components.playercontroller
         local platform,rx,rz=pc:GetPlatformRelativePosition(x,z)
         if RPC.PredictWalking then
@@ -183,6 +185,7 @@ do --走向和攻击函数
 
 
 	function HitAndRun:_PredictWalk(pos)
+		if not Throttle.Move(ThePlayer,pos) then return false end
 		local animpos = pos
 		local x, z = animpos.x, animpos.z
 		doPredictwalk(x, z)
@@ -194,6 +197,7 @@ do --走向和攻击函数
 	function HitAndRun:PredictWalk(ppos, mpos, target)
 		if HitAndRun.PC:CanLocomote() and not HitAndRun.PC.ismastersim then
 			local animpos = POS_util:CalculateAimPos(ppos, mpos, 0, 0.5)
+			if not Throttle.Move(ThePlayer,animpos) then return false end
 			local action = BufferedAction(HitAndRun.PC.inst, nil, ACTIONS.WALKTO, nil, animpos)
 			HitAndRun.PC:DoAction(action)
 		else
@@ -212,6 +216,7 @@ do --走向和攻击函数
 	--攻击
 	function HitAndRun:CloseAndAttack(target, force_force)
 		if not target or not ThePlayer then return end
+        if not Throttle.Attack(ThePlayer,target) then return false end
         HitAndRun:StopPredictWalk()
 		local pos = target:GetPosition()
 		local noforce = true
@@ -223,7 +228,9 @@ do --走向和攻击函数
 		elseif ThePlayer.components.playercontroller:CanLocomote() and not ThePlayer.components.playercontroller.ismastersim then
 			local act = BufferedAction(ThePlayer.components.playercontroller.inst, target, ACTIONS.ATTACK)
 			if act ~= nil then
+				local sent=false
 				act.preview_cb = function()
+                    if sent then return end;sent=true
 					SendRPCToServer(RPC.LeftClick, ACTIONS.ATTACK.code, pos.x, pos.z, target, true, 10,
 						nil, nil)
 				end
@@ -264,6 +271,7 @@ do --走向和攻击函数
 			end
 		end
 		local x, z = fx, fz
+		if not Throttle.Move(ThePlayer,Vector3(x,0,z)) then return false end
 		local ActiveItem = ThePlayer.replica.inventory:GetActiveItem()
 		local playercontroller = ThePlayer.components.playercontroller
 		if playercontroller:CanLocomote() then
@@ -533,6 +541,7 @@ end) ]]
 				and MOD_util:GetMOption("hitandrun_dt_runaway", HitAndRun.dt_runaway) then
 				walkway = HitAndRun:RunAwayOverride(HitAndRun.ent) or walkway
 			end
+			if HitAndRun.shadowself_hold_ground and HitAndRun.shadowself_hold_ground() then walkway="shadowself_hold" end
 			HitAndRun.final_walkway = walkway
 			local oops
 			if not ThePlayer:HasTag("attack") then
@@ -561,6 +570,10 @@ end) ]]
 					HitAndRun.p_range + HitAndRun.ent:GetPhysicsRadius(0) - HitAndRun.rangeoffset,
 					HitAndRun.ent, true)
 				HitAndRun.skip_attack_num = 1 --为了远离
+				HitAndRun.last_fa_time, HitAndRun.guid = GetTime(), HitAndRun.ent.GUID
+			elseif walkway == "shadowself_hold" then
+				oops = false -- 持续攻击阶段不能用随后兜底的WALKTO取消刚提交的攻击。
+				HitAndRun:CloseAndAttack(HitAndRun.ent)
 				HitAndRun.last_fa_time, HitAndRun.guid = GetTime(), HitAndRun.ent.GUID
 			elseif walkway == true then
 				HitAndRun:PredictWalkTo(HitAndRun.ppos, HitAndRun.pos, -walkrange,

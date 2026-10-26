@@ -1,4 +1,5 @@
 local AIPLAYER=require("shadowself/legacy/registry")
+local Throttle=require("shadowself/control/rpc_throttle")
 -- 所有动作采用游戏已有动作定义与 RPC，绝不注册需要服务端安装的 ModRPC。
 local ActionLibrary = Class(function(self, player, config, perception)
     self.player, self.config, self.perception = player, config, perception
@@ -97,6 +98,8 @@ function ActionLibrary:Execute(action)
     local pc = self.player.components.playercontroller
     if not action or not pc or not pc:IsEnabled() or pc:IsBusy() then return false, "角色忙碌" end
     if action.target and not action.target:IsValid() then return false, "目标消失" end
+    local point=action.action==ACTIONS.WALKTO and action:GetActionPoint() or nil
+    if not Throttle.Action(self.player,action.action,action.target,action.invobject,point) then return false,"请求限频" end
     self.has_request=true
     if action._aiplayer_route == "inventory" then
         if pc.ismastersim then pc:DoAction(action)
@@ -124,7 +127,7 @@ end
 function ActionLibrary:Stop()
     local pc = self.player.components.playercontroller
     self.generation=self.generation+1
-    if pc and not pc.ismastersim and self.has_request then
+    if pc and not pc.ismastersim and self.has_request and Throttle.Stop(self.player) then
         -- 已发出的点击可能仍在服务器排队；点脚下替换旧行走目标，并释放连续控制。
         local point=self.player:GetPosition()
         local platform,x,z=pc:GetPlatformRelativePosition(point.x,point.z)

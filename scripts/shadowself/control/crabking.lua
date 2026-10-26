@@ -47,6 +47,9 @@ function K:Tick(target)
   self:Unlock();self.ice_since=nil;self.stage="king";self.wall=nil;self.pending=nil;self.roster=nil
   return "attack",self:Select(king)
  end
+ if self.stage=="king" and not king:HasTag("notarget") then
+  return "attack",self:Select(king) -- 同一破冰输出窗内不因小蟹醒来退回吹箫/拆墙。
+ end
  self.ice_since=self.ice_since or now
  local mobs,walls={},{};local airborne=false;local asleep=true
  if now>=(self.next_scan or 0) then self.entities=TheSim:FindEntities(kp.x,0,kp.z,40);self.next_scan=now+.1 end
@@ -61,7 +64,11 @@ function K:Tick(target)
  self.roster=roster
  if changed then self.stable_at=now+.25;self.route=nil end
  local flute
- for _,item in ipairs(A.Items(p)) do if item.prefab=="panflute" and item:IsValid() then flute=item;break end end
+ local tools=require("shadowself/control/arena_tools")
+ for _,item in ipairs(A.Items(p)) do if item.prefab=="panflute" and tools.Usable(item) then flute=item;break end end
+ if #mobs>0 and not asleep and not flute and tools.Recover(c,"panflute") then
+  self.stage="resupply";return "support",king
+ end
  -- MAXRANGE=4，原版0.8秒后发射小蟹，落地前带nosleep，不能提前浪费吹奏。
  if now-self.ice_since<1 or airborne or now<(self.stable_at or 0) then
   self:Unlock();self.stage="landing";self:Select(king);c.status="帝王蟹 · 等飞蟹落地后催眠"
@@ -98,7 +105,14 @@ function K:Tick(target)
   end
   c.status="帝王蟹 · 催眠小蟹后破冰";return "support",king
  end
- self:Unlock();self.stage="break"
+ self:Unlock()
+ -- 原版OnKeyStoneRemoved在首面有效冰墙移除后就清除notarget，icewall标签仍会保留。
+ -- 小蟹控制完成后以实际可选中状态切回本体，不必打光剩余冰墙。
+ if not king:HasTag("notarget") then
+  self.stage="king";self.wall=nil;c.status="帝王蟹 · 本体已可攻击，持续输出"
+  return "attack",self:Select(king)
+ end
+ self.stage="break"
  local wall=self.wall
  if not live(wall) then
   local distance;wall=nil

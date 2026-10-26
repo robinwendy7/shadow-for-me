@@ -9,20 +9,23 @@ local function entity(name,x)
 end
 local p=entity('wilson',0);local busy=false;local equipped=false;local attacks=0;local guard
 p.components={playercontroller={IsBusy=function() return busy end}}
-package.loaded['shadowself/control/actions']={Attack=function(_,target,check) assert(not check or check());attacks=attacks+1;guard=check;return true end}
+package.loaded['shadowself/control/actions']={Stop=function() end,Attack=function(_,target,check) assert(not check or check());attacks=attacks+1;guard=check;return true end}
 package.loaded['shadowself/control/arena_snails']=nil
 local M=require('shadowself/control/arena_snails');local torch=entity('torch');local hasTorch=true
+p.replica.inventory={GetEquippedItem=function() return equipped and torch or nil end}
 local c={player=p,enemies={},bridge={allowed=function(e) return not M.Burning(e) end,PauseAttack=function() end},mechanisms={Equip=function(_,item) assert(item==torch);return equipped end}}
 local boss={c=c,Item=function() return hasTorch and torch end,Release=function() end,Away=function() return 'move' end,Select=function(_,e) return e end}
 for _,name in ipairs({'slurtle','snurtle'}) do
- local snail=entity(name,1);now=now+3;boss.next_snail_fire=nil
+ local snail=entity(name,1);now=now+3;boss.next_snail_fire=nil;c.enemies={}
  equipped=false;local before=attacks
  assert(M.Tick(boss,snail)=='support' and attacks==before,'wait for actual torch equip acknowledgement')
  equipped=true;assert(M.Tick(boss,snail)=='support' and attacks==before+1)
  M.Tick(boss,snail);assert(attacks==before+1,'wait for burning sync rather than duplicate attacks')
- local delayed=guard;snail.tags.fire=true
+ local delayed=guard;snail.pos=Vector3(1.3,0,0);assert(delayed(),'small target movement after contact keeps the real torch-range attack');snail.pos=Vector3(1,0,0);snail.tags.fire=true
  assert(not delayed() and M.Tick(boss,snail)=='move','burning acknowledgement cancels stale attack and exits explosion radius')
  assert(attacks==before+1)
+ assert(require('shadowself/control/arena_fire').Zone(snail,p).fire,'fresh ignition immediately creates a burning danger zone')
+ now=now+6
  local zone=require('shadowself/control/arena_fire').Zone(snail,p)
  assert(zone and zone.explosive_snail and zone.radius>3,'burning snail explosion joins normal arena hazard escape')
  p.pos=Vector3(8,0,0);local other=entity('slurper',12);c.enemies={snail,other}

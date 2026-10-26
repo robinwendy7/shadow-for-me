@@ -87,7 +87,7 @@ TUNING.Cheatthread=nil
 c.combat.Available=function() return true end;said={};local speech={}
 c.Say=function(_,text) speech[#speech+1]=text end
 runtime.queue={{kind="hurt"},{kind="rain"}}
-assert(c:OfferCombat() and #speech==1 and speech[1]=="亲爱的我，你又受伤了，需要我帮忙的话点同意接管。")
+assert(c:OfferCombat() and #speech==1 and speech[1]=="亲爱的我，你又受伤了，需要我帮忙的话点护甲槽上方的接管按钮。")
 assert(#runtime.queue==1 and runtime.queue[1].kind=="rain","consent clears stale hurt reminders only")
 assert(not c:OfferCombat() and #speech==1,"pending request cannot emit another line")
 local Runtime=require("shadowself/runtime")
@@ -99,6 +99,28 @@ c:Stop(nil,true)
 -- HUD combat click is consent, but execution still waits for shadow covering.
 c:CombatButton();assert(c.phase=="diving" and c.task.kind=="fight" and not c.job_started)
 c:CombatButton();assert(not c.phase,"HUD button also cancels the covering transition")
+local savedAdapter=package.loaded["shadowself/control/arena_adapter"]
+local arenaSnapshot={arena=true,instance="arena-test",kind="PARTICIPANT"}
+package.loaded["shadowself/control/arena_adapter"]=function() return {Snapshot=function() return arenaSnapshot end} end
+c:CombatButton();assert(c.phase=="diving" and c.task.kind=="arena","inventory click inside arena starts the full arena job, not bare fight")
+now=now+1;c:Frame(.016);c:Frame(.016)
+assert(c.phase=="active" and c.jobs.plan.kind=="arena","merged click finishes possession and dispatches the arena job")
+c:CombatButton();assert(not c.phase)
+assert(c:OfferCombat() and c.pending.plan.kind=="arena","hurt consent and inventory button choose the same arena job")
+c:CombatButton();assert(c.phase=="diving" and c.task.kind=="arena")
+c:CombatButton()
+arenaSnapshot.kind="SPECTATOR"
+assert(c:CombatPlan().kind=="fight","spectator HUD cannot start arena automation")
+arenaSnapshot=nil
+assert(c:CombatPlan().kind=="fight","outside arena retains ordinary combat")
+package.loaded["shadowself/control/arena_adapter"]=savedAdapter
+-- The merged button must accept the pending arena plan instead of overwriting it with fight.
+c:AskPlan({kind="arena",label="单人角斗场循环"},"自动角斗场循环")
+local arena_plan=c.pending.plan
+c:CombatButton();assert(c.phase=="diving" and c.task==arena_plan and not c.pending,"HUD confirms the requested arena task")
+c:CombatButton();assert(not c.phase)
+c.pending={plan=arena_plan,until_time=now-1}
+c:CombatButton();assert(not c.phase and not c.pending,"expired request cannot become a new fight")
 -- 实际桥接模块：确认使用原生走A入口、过滤目标、恢复运行时设置并保留他人线程。
 package.loaded["shadowself/control/combat"]=nil
 local Bridge=require("shadowself/control/combat")

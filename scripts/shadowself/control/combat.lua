@@ -24,6 +24,7 @@ function Bridge:Start(plan,matches)
     self.plan=plan;self.clear_since=nil;self.next_finish_scan=nil;self.finished=false
     local function allowed(e)
         if not e or not e:IsValid() or e==self.player or e:HasTag("player") or e:HasTag("playerghost") then return false end
+        if plan.arena and plan.arena_wave and plan.arena_wave()==11 and (e.prefab=="chest_mimic" or e.prefab=="chest_mimic_revealed") then return false end
         if plan.arena and require("shadowself/control/arena_snails").Burning(e) then return false end
         local n=e.prefab or ""
         if n:find("sandspike_",1,true)==1 or n=="sandblock" then return false end
@@ -34,13 +35,17 @@ function Bridge:Start(plan,matches)
         if e.prefab=="beeguard" and require("shadowself/control/status").Sleeping(e) then return false end
         if e.prefab=="icehound" or e.prefab=="firehound" then
             local a=e.AnimState
-            if e:HasTag("sleeping") or a and (a:IsCurrentAnimation("sleep_pre") or a:IsCurrentAnimation("sleep_loop") or a:IsCurrentAnimation("sleep_pst")) then return false end
+            if (e:HasTag("sleeping") or a and (a:IsCurrentAnimation("sleep_pre") or a:IsCurrentAnimation("sleep_loop") or a:IsCurrentAnimation("sleep_pst")))
+             and not (plan.arena_walrus and plan.arena_walrus:Escort(e)) then return false end
         end
+        if plan.arena_spider_control and not plan.arena_spider_control(e) then return false end
         local combat=self.player.replica.combat
-        if combat and combat:IsAlly(e) then return false end
+        local arena_bird=require("shadowself/control/targetpolicy").ArenaBird(self,e)
+        if combat and combat:IsAlly(e) and not arena_bird then return false end
         if e:HasTag("INLIMBO") or e:HasTag("isdead") or e:HasTag("dead") then return false end
         local health=e.replica and e.replica.health
         if health and health.IsDead and health:IsDead() then return false end
+        if arena_bird then return true end
         if plan.arena and plan.arena_contains and plan.arena_contains(e) and e.replica and e.replica.combat then return true end
         if self.resume_target==e or self.priority_target==e then return true end
         if self.coordinator and self.coordinator.encounters and self.coordinator.encounters.allowed[e] then return true end
@@ -61,12 +66,26 @@ function Bridge:Start(plan,matches)
     local wrapper=function(object,range)
         original(object,plan.arena and math.max(range or 0,30) or range)
         for e in pairs(object.selected_ents or {}) do if not allowed(e) then object.selected_ents[e]=nil end end
+        -- 原生扫描内部也排除IsAlly，补回经过当前关卡名单确认的鸟。
+        if plan.arena_remaining then
+            local policy=require("shadowself/control/targetpolicy")
+            for _,e in ipairs(plan.arena_remaining()) do
+                if policy.ArenaBird(self,e) and allowed(e) then object.selected_ents[e]=true end
+            end
+        end
     end
     self.wrappers.GetAttackTargets.current=wrapper;h.GetAttackTargets=wrapper
     local closest=h.GetClosestTarget
     if closest then
         local pick=function(object,...)
+            local bird=require("shadowself/control/targetpolicy").Bird(self)
+            if bird then return bird end
             local e=self.priority_target
+            if e and e.prefab=="slurper" and plan.arena then
+                local c=self.coordinator or {player=self.player,plan=plan,bridge=self}
+                e=require("shadowself/control/arena_slurper").Nearest(c,object.selected_ents,e and function(v) return allowed(v) end,e) or e
+                self.priority_target=e;self.resume_target=e
+            end
             if e and e:IsValid() and allowed(e) then
                 return require("shadowself/control/targetpolicy").Rook(e) and require("shadowself/control/targetpolicy").Other(self,e) or e
             end
@@ -141,6 +160,20 @@ function Bridge:ResumeAttack()
     Debug.Event(self.coordinator,"native_resume",{target=Debug.Entity(self.h.ent)})
     self.h:StartHitAndRun();self.thread=self.tuning.Cheatthread
 end
+function Bridge:RetreatFromTraps(c)
+ local whip=c.plan and c.plan.arena_whip_state
+ if whip and whip.active and c.plan.arena_wave and c.plan.arena_wave()==2 and not whip:CanAttack(c.player) then
+  -- 还没拿到猫鞭时保留原有“安全捡鞭再退”的顺序，避免走近掉落鞭时反复折返。
+  if c.plan.arena_ground and not require("shadowself/control/arena_tools").Owned(c,"whip") then
+   for _,item in ipairs(c.plan.arena_ground()) do
+    if item.prefab=="whip" and require("shadowself/control/arena_tools").Usable(item)
+     and whip:CanPickup(c.player,item) then return false end
+   end
+  end
+  whip:Evade(c);return true
+ end
+ return false
+end
 function Bridge:Supervise()
     local pc=self.player.components.playercontroller
     self.action_pc=pc
@@ -171,9 +204,23 @@ function Bridge:Supervise()
                     if not self:OwnsThread() then h.ent=target;self.wrappers.PreTheLoop.old(h) end
                     c:Scan();c:HitRecovery()
                     c.mechanisms=c.mechanisms or require("shadowself/control/mechanisms")(c)
-                    local support=c.mechanisms:Tick()
+                    local opening=c.plan and c.plan.arena_clockwork
+                    local hunt=c.plan and c.plan.arena_walrus
+                    local tank=require("shadowself/control/boneguard").Ready(c)
+                    if tank then require("shadowself/control/boneguard").Attack(c,target) end
+                    local bishop_evading=not tank and opening and opening:Live() and opening:Block(c)
+                    local committed=c.plan and c.plan.arena_bird_committed and c.plan.arena_bird_committed(target)
+                     or c.plan and c.plan.arena_strategy and c.plan.arena_strategy.target==target
+                     or opening and opening:Live() and not bishop_evading
+                     or hunt and hunt.Committed and hunt:Committed(target)
+                     or require("shadowself/control/sharkroute").Committed(c,target) or tank
+                    local support=self:RetreatFromTraps(c) -- 禁攻状态仍主动撤离，拾取/装备等待不能抢占。
+                    if not support then support=not bishop_evading and not committed and require("shadowself/control/arena_disarm").Tick(c) end
+                    if bishop_evading then c.mechanisms:Scan() end -- 只更新瞄准标记，不让补给动作抢走躲避。
+                    if not bishop_evading and not support and not committed then support=c.mechanisms:Tick() end
                     local mode,picked
-                    if not support and (target.prefab=="beequeen" or target.prefab=="beeguard" or c.beequeen and c.beequeen.queen) then
+                    if tank then mode,picked="attack",target;c.blocked=false end
+                    if not support and not mode and (target.prefab=="beequeen" or target.prefab=="beeguard" or c.beequeen and c.beequeen.queen) then
                         c:NativePulse()
                         if c.queen_active then mode=c.blocked and "support" or "attack";picked=c.h.ent end
                     end
@@ -181,10 +228,11 @@ function Bridge:Supervise()
                         c.crabking=c.crabking or require("shadowself/control/crabking")(c)
                         mode,picked=c.crabking:Tick(target)
                     end
-                    if not support and not mode and c.bosses then mode,picked=c.bosses:Tick(target) end
-                    if not support and not mode and c.encounters then mode,picked=c.encounters:Tick(target) end
-                    if not support and mode~="move" and mode~="support" and c.healing then support=c.healing:Tick(c) end
-                    if not support and mode~="move" and mode~="support" and c.supplies
+                    if not bishop_evading and not committed and not support and not mode and c.bosses then mode,picked=c.bosses:Tick(target) end
+                    if not bishop_evading and not committed and not support and not mode and c.encounters then mode,picked=c.encounters:Tick(target) end
+                    local late_support=c.plan and c.plan.arena_stage12
+                    if not bishop_evading and (not committed or late_support) and not support and mode~="move" and mode~="support" and c.healing then support=c.healing:Tick(c) end
+                    if not bishop_evading and (not committed or late_support) and not support and mode~="move" and mode~="support" and c.supplies
                      and not (c.healing and (c.healing.pending or GetTime()<(c.healing.draining_until or 0))) then support=c.supplies:Tick() end
                     if picked and picked~=target then target=picked;h.ent=target;self.wrappers.PreTheLoop.old(h) end
                     if support or mode=="move" or mode=="support" then
@@ -194,7 +242,12 @@ function Bridge:Supervise()
                     else
                         local d=math.sqrt(self.player:GetPosition():DistSq(target:GetPosition()))
                         local reach=c.gear:AttackRange()+target:GetPhysicsRadius(0)
-                        local chasing=self.chasing and d>reach+.25 or d>reach+2
+                        local rook=c.bosses and c.bosses.rooks[target]
+                        local attack_approach=committed or require("shadowself/control/arena_attackwindows").Committed(c,target) or c.bosses and c.bosses:KnightCommitted(target) or rook and rook.ready
+                         and require("shadowself/control/targetpolicy").ClockworkRook(self)==target
+                        local bird=c.plan and c.plan.arena_bird_committed and c.plan.arena_bird_committed(target)
+                        if bird then reach=require("shadowself/control/arena_bird_range").Reach(c,target) end
+                        local chasing=bird and require("shadowself/control/arena_bird_range").Chase(c,target) or not bird and not attack_approach and (self.chasing and d>reach+.25 or d>reach+2)
                         if chasing then
                             self:PauseAttack();self.chasing=true;c.travel.chasing=true;h.ent=target;self.wrappers.PreTheLoop.old(h)
                             c.travel.restore_dodge=nil;c.travel.role="move"
@@ -226,7 +279,8 @@ function Bridge:Supervise()
                 else
                     self:PauseAttack();self.chasing=nil;c.travel.chasing=nil
                     c:Scan();c.mechanisms=c.mechanisms or require("shadowself/control/mechanisms")(c)
-                    local danger=c.mechanisms:Tick()
+                    local danger=self:RetreatFromTraps(c)
+                    if not danger then danger=c.mechanisms:Tick() end
                     if not danger and c.healing then c.healing:Tick(c) end
                 end
             end
@@ -254,8 +308,34 @@ function Bridge:Coordinate(plan)
     self.coordinator=require("shadowself/control/coordinator")(self,plan)
     self.coordinator.secondary=require("shadowself/control/secondary")(self.coordinator)
     self.after_dodge_old=h.shadowself_after_dodge
-    self.after_dodge=function(captured) return self.coordinator.secondary:AfterDodge(captured) end
+    self.after_dodge=function(captured)
+        local c=self.coordinator
+        require("shadowself/control/arena_moose").AfterDodge(c,captured)
+        if c.plan and c.plan.arena_clockwork then
+            local bishop=c.plan.arena_clockwork:AfterDodge(c)
+            if bishop then return bishop end
+        end
+        return c.secondary:AfterDodge(captured)
+    end
     h.shadowself_after_dodge=self.after_dodge
+    self.hold_ground_old=h.shadowself_hold_ground
+    self.hold_ground=function()
+        local r=plan.arena_clockwork
+        local hunt=plan.arena_walrus
+        local bosses=self.coordinator and self.coordinator.bosses
+        local crab=self.coordinator and self.coordinator.crabking
+        return plan.arena_bird_committed and plan.arena_bird_committed(h.ent)
+         or require("shadowself/control/boneguard").Ready(self.coordinator)
+         or require("shadowself/control/arena_attackwindows").Committed(self.coordinator,h.ent)
+         or bosses and bosses:KnightCommitted(h.ent)
+         or require("shadowself/control/arena_moose").Hold(self.coordinator,h.ent)
+         or require("shadowself/control/arena_rook_window").Allow(self.coordinator,h.ent)
+         or crab and crab:Active() and crab:Allowed(h.ent) and (crab.stage=="king" or crab.stage=="break")
+         or require("shadowself/control/sharkroute").Committed(self.coordinator,h.ent)
+         or hunt and hunt.Committed and hunt:Committed(h.ent)
+         or r and r:Live() and not r:Block(self.coordinator) and h.ent==r.target
+    end
+    h.shadowself_hold_ground=self.hold_ground
     -- Subscribe to the original event instead of replacing the original dodge.
     if self.player.ListenForEvent then
         self.manual_listener=function(_,data)
@@ -279,7 +359,8 @@ function Bridge:Coordinate(plan)
         self.equip_listener=function(_,data)
             local c=self.coordinator
             if not c or not data then return end
-            if data.type=="walk_hands" then c.travel:BeginDodge(c.snapshot)
+            if data.type=="walk_hands" then
+                if not require("shadowself/control/boneguard").Attack(c,c.h.ent) then c.travel:BeginDodge(c.snapshot) end
             elseif data.type=="fight" and self.chasing then return
             elseif data.type=="fight" and c.travel.dodging then
                 if c.beequeen and c.beequeen.travelling then return end
@@ -304,8 +385,32 @@ function Bridge:Coordinate(plan)
         wrap(name,function(old,object,...)
             local c=self.coordinator
             if self.pause_requested then return false end
+            if require("shadowself/control/arena_windcycle").Blocked(c) then return false end
+            if name=="CloseAndAttack" and c.plan and c.plan.arena then
+                local hand=c.player.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)
+                if hand and hand.prefab=="torch" then return false end
+            end
             if c.healing and c.healing:BlockAttack(name) then return false end
+            if c.plan and c.plan.arena_clockwork and c.plan.arena_clockwork:Block(c) then return false end
+            if c.plan and c.plan.arena_whip_state and not c.plan.arena_whip_state:CanAttack(c.player) then return false end
             local explicit=...;local victim=(name=="CloseAndAttack" or name=="ShouldAtkWhenDodging") and type(explicit)=="table" and explicit.prefab and explicit or object.ent
+            if c.plan and c.plan.arena and c.plan.arena_wave and c.plan.arena_wave()==4 and victim and victim.prefab=="bearger" then
+                local weapon=c.player.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)
+                if not weapon or not require("shadowself/control/arena_inventory").Weapon(weapon,c.player)
+                    or not require("shadowself/control/arena_tools").Usable(weapon) then return false end
+            end
+            if c.plan and c.plan.arena_bone_busy and c.plan.arena_bone_busy() then return false end
+            if c.plan and c.plan.arena_spider_control and not c.plan.arena_spider_control(victim) then return false end
+            if c.plan and c.plan.arena_stage11 and not c.plan.arena_stage11:Allowed(victim) then return false end
+            if c.plan and c.plan.arena_stage12 and not c.plan.arena_stage12:Allowed(victim) then return false end
+            if c.plan and c.plan.arena_bird_committed and c.plan.arena_bird_committed(victim) then
+                if require("shadowself/control/arena_bird_range").Chase(c,victim) then return false end
+            end
+            if c.plan and c.plan.arena_snail_scene and not c.arena_snailpack then return false end
+            if c.arena_snailpack and not c.arena_snailpack:CanAttack(victim) then return false end
+            local bird=require("shadowself/control/targetpolicy").Bird(self)
+            if bird and victim~=bird then return false end
+            if c.plan and c.plan.arena_walrus and not c.plan.arena_walrus:CanAttack(victim) then return false end
             if require("shadowself/control/targetpolicy").Rook(victim) and require("shadowself/control/targetpolicy").Other(self,victim) then return false end
             if c.crabking and c.crabking:Active() and not c.crabking:Allowed(victim) then return false end
             if c.beequeen and c.beequeen.GuardAttackBlocked and c.beequeen:GuardAttackBlocked(victim) then Debug.Block(c,name,victim);return false end
@@ -330,13 +435,18 @@ function Bridge:Coordinate(plan)
             if name=="ShouldAtkWhenDodging" and c.queen_dodging then return false end
             if name=="ShouldAtkWhenDodging" and c.charge_target and c.charge_target==object.ent then return false end
             if name=="CloseAndAttack" then Debug.Throttle(c,"attack_dispatch",.25,"attack_dispatch",{target=Debug.Entity(victim)}) end
+            -- 与玩家正常强制攻击同一路径；无预测模式也不能被客户端友方判断静默拒绝。
+            if name=="CloseAndAttack" and require("shadowself/control/targetpolicy").ArenaBird(self,victim) then
+                return old(object,victim,true)
+            end
             return old(object,...)
         end)
     end
     -- Never replace POS_util.GoToPoint/WalkTo/DoDodge: native movement is intact.
     wrap("IsAttackPre",function(old,object,target,...)
+        if require("shadowself/control/boneguard").Ready(self.coordinator) then return false end
         self.coordinator.travel:UpdateDodge(self.coordinator.snapshot)
-        local data=old(object,target,...)
+        local data=require("shadowself/control/boneguard").Early(self.coordinator,target,old(object,target,...))
         local c=self.coordinator;local queen=c.beequeen and c.beequeen.queen
         c.queen_dodging=nil
         if queen and queen:IsValid() and queen~=target and self.player:GetPosition():DistSq(queen:GetPosition())<10^2 then
@@ -350,6 +460,10 @@ function Bridge:Coordinate(plan)
         if self.coordinator.mechanisms then data=self.coordinator.mechanisms:Dodge(target,data) end
         if self.coordinator.encounters then data=self.coordinator.encounters:Dodge(target,data) end
         if self.coordinator.bosses then data=self.coordinator.bosses:Dodge(target,data) end
+        if c.plan and c.plan.arena_bird_committed and c.plan.arena_bird_committed(target) then return nil end
+        local hunt=c.plan and c.plan.arena_walrus
+        if hunt and hunt.Committed and hunt:Committed(target) then return nil end
+        if c.plan and c.plan.arena_clockwork then data=c.plan.arena_clockwork:Dodge(c,target,data) end
         local args={...}
         return self.coordinator.secondary:Wrap(target,data,args[2])
     end)
@@ -372,6 +486,7 @@ function Bridge:Finished()
 end
 function Bridge:OwnsThread() return self.thread~=nil and (self.tuning or require("shadowself/native").Get().TUNING).Cheatthread==self.thread end
 function Bridge:Stop()
+    if self.h and self.h.shadowself_hold_ground==self.hold_ground then self.h.shadowself_hold_ground=self.hold_ground_old end
     if self.h and self.h.shadowself_after_dodge==self.after_dodge then self.h.shadowself_after_dodge=self.after_dodge_old end
     Debug.End(self.coordinator,"takeover_stop")
     local pc=self.action_pc or self.player.components and self.player.components.playercontroller

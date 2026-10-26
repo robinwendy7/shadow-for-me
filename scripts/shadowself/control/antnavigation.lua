@@ -1,4 +1,4 @@
--- Small local graph used only when antlion's immediate arcs have no through-exit.
+-- 蚁狮圆周分段路线；整段净空校验，双向被堵时才使用局部连通图。
 local Nav=require("shadowself/control/navigation")
 local M={}
 local function dist(a,b) return math.sqrt(a:DistSq(b)) end
@@ -22,6 +22,70 @@ function M.Corridor(c,a,b,ant)
   if not point(c,q) or dist(q,ep)<inside-.02 or Nav.Risk(c,q,ant)>initial+.02 then return false end
  end
  return initial==0 or Nav.Risk(c,b,ant)<initial-.01
+end
+function M.Valid(c,ant,route)
+ local p=c.player:GetPosition()
+ for i=route.index or 1,#route.points do
+  local q=route.points[i]
+  if not M.Corridor(c,p,q,ant) then return false end
+  p=q
+ end
+ return true
+end
+function M.Orbit(c,ant,side,offset)
+ local p=c.player:GetPosition();local ep=ant:GetPosition();local radius=dist(p,ep)
+ local body=ant:GetPhysicsRadius(0)+c.player:GetPhysicsRadius(0)+.2
+ local wanted=math.max(radius,body)+ (offset or 0)
+ if wanted<body or wanted<.5 then return end
+ local theta=math.atan2(p.z-ep.z,p.x-ep.x);local points={};local last=p
+ local function add(q)
+  if not M.Corridor(c,last,q,ant) then return false end
+  points[#points+1]=q;last=q;return true
+ end
+ -- 半径变化也拆段，不能斜穿蚁狮碰撞体或中途沙刺。
+ local radial=math.max(1,math.ceil(math.abs(wanted-radius)/.4))
+ for i=1,math.abs(wanted-radius)>.01 and radial or 0 do
+  local r=radius+(wanted-radius)*i/radial
+  if not add(Vector3(ep.x+math.cos(theta)*r,0,ep.z+math.sin(theta)*r)) then return end
+ end
+ local length=2.6;local steps=math.ceil(length/.4)
+ for i=1,steps do
+  local a=theta+side*length/wanted*i/steps
+  if not add(Vector3(ep.x+math.cos(a)*wanted,0,ep.z+math.sin(a)*wanted)) then return end
+ end
+ if Nav.Risk(c,last,ant)>0 then return end
+ return {points=points,index=1,goal=last,side=side,kind="orbit"}
+end
+-- 已在爆发区内时允许先作风险下降的短步，不要求一步就到完全零风险区域。
+function M.Exit(c,ant)
+ local p=c.player:GetPosition();local initial=Nav.Risk(c,p,ant)
+ if initial<=0 then return end
+ local best,score
+ for _,length in ipairs({2,3,4}) do for i=0,23 do
+  local a=i*math.pi/12;local q=Vector3(p.x+math.cos(a)*length,0,p.z+math.sin(a)*length)
+  local risk=Nav.Risk(c,q,ant)
+  if risk<initial-.01 and M.Corridor(c,p,q,ant) then
+   local value=risk*100+length
+   if not score or value<score then best,score=q,value end
+  end
+ end end
+ return best
+end
+function M.Plan(c,ant,preferred)
+ -- 原半径两侧都不通才短暂变更环半径，正常走位不累计向外漂移。
+ for _,offset in ipairs({0,1,-1,2}) do
+  for _,side in ipairs({preferred,-preferred}) do
+   local route=M.Orbit(c,ant,side,offset)
+   if route then return route end
+  end
+ end
+ local p=c.player:GetPosition();local ep=ant:GetPosition();local r=dist(p,ep)
+ local a=math.atan2(p.z-ep.z,p.x-ep.x)+preferred*.6
+ local hint=Vector3(ep.x+math.cos(a)*r,0,ep.z+math.sin(a)*r)
+ local waypoint,goal=M.Route(c,ant,hint)
+ if waypoint then return {points={waypoint},index=1,goal=waypoint,exit=goal,kind="detour",side=preferred} end
+ local escape=M.Exit(c,ant)
+ if escape then return {points={escape},index=1,goal=escape,kind="escape",side=preferred} end
 end
 function M.Room(c,q,ant,from)
  local open,forward=0,0;local dx,dz=from and q.x-from.x or 0,from and q.z-from.z or 0
@@ -51,6 +115,7 @@ function M.Route(c,ant,hint)
    nodes[key(x,z)]={x=x,z=z,q=q}
   end
  end end
+ local emergency=Nav.Risk(c,p,ant)>0
  local root=nodes[key(0,0)];root.depth=0
  local queue={root};local index=1;local best,score
  while index<=#queue do
@@ -73,7 +138,7 @@ function M.Route(c,ant,hint)
     if v and not v.depth and M.Corridor(c,p,v.q,ant) then v.depth=1;v.parent=n;queue[#queue+1]=v end
    end end end
   end
-  if n~=root and degree>=3 then
+  if n~=root and (degree>=3 or emergency and degree>=1) then
    local value=room*4+degree*3+Nav.Clearance(c,n.q)-n.depth*.6
    if hint then value=value-n.q:DistSq(hint)*5
    elseif M.Approach(c,n.q,ant) then value=value+80 end

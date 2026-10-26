@@ -29,38 +29,13 @@ function S:Little(target,entities)
  return "support",target
 end
 function S:Pirates(entities)
- local c=self.c;local monkeys={};local captain
- for _,e in ipairs(entities) do if live(e) and c.bridge.allowed(e) then
-  if e.prefab=="powdermonkey" then monkeys[#monkeys+1]=e elseif e.prefab=="primemate" then captain=e end
- end end
- if not captain then return end
- if #monkeys>0 then
-  self.wind=self.wind or require("shadowself/control/arena_goats")(self.owner,"火药猴")
-  local mode,picked=self.wind:Tick(monkeys)
-  if mode then return mode,picked end
-  return "attack",self.owner:Target(monkeys[1])
+ if not self.pirates then
+  local found=false
+  for _,e in ipairs(entities) do if live(e) and (e.prefab=="prime_mate" or e.prefab=="powder_monkey") then found=true;break end end
+  if not found then return end
  end
- self.owner:Target(captain)
- if captain:HasTag("fire") or captain:HasTag("burning") then self.ignited[captain]=true end
- if self.ignited[captain] then
-  self.owner:Release()
-  local weapon=c.gear:Weapon();c.gear:Swap("attack",c.snapshot)
-  if weapon and c.player.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)~=weapon then return "support",captain end
-  return "attack",captain
- end
- local torch=Tools.Owned(c,"torch")
- if not torch then return "attack",captain end
- c.bridge:PauseAttack()
- if c.player.components.playercontroller:IsBusy() then return "support",captain end
- local p=c.player:GetPosition();local q=captain:GetPosition();local d=math.sqrt(p:DistSq(q));local reach=2+captain:GetPhysicsRadius(0)
- if d>reach then
-  return self.owner:Move(Vector3(q.x+(p.x-q.x)/d*(reach-.1),0,q.z+(p.z-q.z)/d*(reach-.1)),"大副 · 靠近火把点燃",captain),captain
- end
- if c.mechanisms:Equip(torch) and GetTime()>=(self.next_fire or 0) then
-  self.owner:Release()
-  if A.Attack(c.player,captain,function() return captain:IsValid() and not captain:HasTag("fire") end) then self.next_fire=GetTime()+1.2 end
- end
- return "support",captain
+ self.pirates=self.pirates or require("shadowself/control/arena_pirates")(self.owner)
+ return self.pirates:Tick(entities)
 end
 function S:Tick(target)
  local c=self.c;local entities=c.plan.arena_remaining and c.plan.arena_remaining() or c.enemies

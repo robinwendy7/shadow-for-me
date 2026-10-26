@@ -18,8 +18,8 @@ assert(Inventory.Obsolete(ham,{ham,bat},p,7) and not Inventory.Obsolete(ham,{ham
 local rain=item('rainhat')
 assert(not Inventory.Obsolete(rain,{rain},p,6) and Inventory.Obsolete(rain,{rain},p,7),'keep rain hat through actual HUD wave6 goats, discard afterwards')
 local torch=item('torch')
-assert(Inventory.Cleanup({torch},p,7,false)==nil and Inventory.Cleanup({torch},p,8)==torch,'ocean entry clears torch')
--- 第七关休整时即采用第八关清理规则。
+assert(Inventory.Cleanup({torch},p,6,false)==nil and Inventory.Cleanup({torch},p,6,true)==torch and Inventory.Cleanup({torch},p,7,false)==torch,'post6 cleanup clears torch and does not preserve it into wave7')
+-- 后续关卡继续清除漏掉的旧物。
 assert(Inventory.Cleanup({torch},p,7,true)==torch,'clear torch before ocean transition')
 local f1,f2,f3=item('waffles'),item('meatballs'),item('dragonpie')
 f1.components.edible={GetHealth=function() return 60 end}

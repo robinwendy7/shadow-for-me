@@ -21,6 +21,57 @@ hand=staff;busy=true;now=.2;wind:Tick({goat});assert(casts==0,'equip animation b
 busy=false;now=.3;wind:Tick({goat})
 assert(casts==1 and releases==0 and c.gear.forced_weapon==staff,'cast cannot call travel release that restores ordinary weapon')
 wind:Stop();assert(c.gear.forced_weapon==sword and not c.arena_wind,'leaving wind tactic restores previous forced weapon')
+local gnome=ent('mushgnome',8)
+gnome.replica.combat={GetAttackRangeWithWeapon=function() return 15 end}
+local crowd=require('shadowself/control/arena_goats')(owner,'群怪')
+now=4;crowd:Tick({gnome});assert(casts==2,'gnome proactive range15 must allow casting at distance8')
+now=5;crowd:Tick({gnome});assert(casts==3,'gnome range cannot cause perpetual retreat/approach instead of repeated casts')
+p.pos=Vector3(6,0,0);now=6
+assert(crowd:Tick({gnome})=='move' and casts==3,'physical crowd clearance still applies')
+p.pos=Vector3(0,0,0);now=7;crowd:Tick({gnome});assert(casts==4,'attack resumes after physical clearance')
+crowd:Stop()
+-- 第六关电羊：先到实际场地外沿，再游离足15秒，单只剩余电羊也不跳过。
+local before=casts;local goal;local outer=require('shadowself/control/arena_goats')(owner)
+owner.Move=function(_,q) goal=q;return 'move' end
+c.plan={arena=true,arena_wave=function() return 6 end,arena_center=function() return Vector3(0,0,0) end}
+p.pos=Vector3(0,0,0);now=20
+assert(outer:Tick({goat})=='move' and casts==before and not outer.edge_since,'travel to boundary does not count as fifteen seconds at the edge')
+assert(math.abs(goal.x)==18 or math.abs(goal.z)==18,'target lies on the source-confirmed arena outer lane')
+p.pos=goal;now=22;outer:Tick({goat});assert(outer.edge_since==22)
+now=36.99;outer:Tick({goat});assert(casts==before and not outer.perimeter_done,'no early tornado during the fifteen-second edge phase')
+p.pos=Vector3(0,0,18);goat.pos=Vector3(8,0,18);now=37
+outer:Tick({goat});assert(outer.perimeter_done and casts==before+1,'fifteen seconds immediately releases actual equipped staff casting without another gather wait')
+outer:Performed({invobject=staff,target=goat})
+now=38;outer:Tick({goat});assert(casts==before+2,'first burst continues to the second acknowledged wind without another patrol')
+outer:Performed({invobject=staff,target=goat});now=39;outer:Tick({goat});assert(casts==before+3)
+for i=4,6 do
+ outer:Performed({invobject=staff,target=goat});now=36+i;outer:Tick({goat})
+ assert(casts==before+i and outer.perimeter_done and outer.limit==6,'goat opening continues through all six acknowledged winds without another patrol')
+end
+outer:Performed({invobject=staff,target=goat});now=42.1
+assert(not outer:Tick({goat}) and outer.melee and c.arena_goat_melee and casts==before+6,'sixth confirmed goat wind immediately releases the caster for melee')
+assert(not c.arena_wind and not c.arena_patrol and c.gear.forced_weapon==sword,'melee transition releases staff and cane control')
+local Cycle=require('shadowself/control/arena_windcycle');c.enemies={goat};c.bridge.allowed=function() return true end
+assert(not Cycle.Blocked(c),'actual goat native melee lock opens after six acknowledged winds')
+local meleeOwner=assert(loadfile('scripts/shadowself/control/encounters.lua'))()(c);meleeOwner.arena_goats=outer
+local mode,target=meleeOwner:Goats(goat)
+assert(mode=='attack' and target==goat,'real encounter dispatch attacks immediately without another gathering or seven-second patrol')
+local straw=ent('strawhat');straw.replica.equippable={EquipSlot=function() return EQUIPSLOTS.HEAD end}
+local head;local requests=0
+package.loaded['shadowself/control/actions'].Items=function() return {staff,cane,sword,straw} end
+p.replica.inventory.GetEquippedItem=function(_,slot) if slot==EQUIPSLOTS.HEAD then return head end;return hand end
+c.mechanisms.Equip=function(_,item) assert(item==straw);requests=requests+1 end
+goat.HasTag=function(_,tag) return tag=='charged' end
+mode=meleeOwner:Goats(goat);assert(mode=='support' and requests==1 and c.gear.protected_slots[EQUIPSLOTS.HEAD],'charged goat melee first requests straw hat and reserves head slot')
+mode=meleeOwner:Goats(goat);assert(mode=='support','equip request alone cannot start attacking')
+head=straw;mode,target=meleeOwner:Goats(goat)
+assert(mode=='attack' and target==goat and requests==2 and c.gear.protected_slots[EQUIPSLOTS.HEAD],'actual straw hat acknowledgement allows melee without equipment oscillation')
+head=nil;assert(meleeOwner:Goats(goat)=='support','lost hat is re-equipped before another melee attack')
+package.loaded['shadowself/control/actions'].Items=function() return {staff,cane,sword} end
+goat.HasTag=function() return false end
+now=80;outer:Tick({goat});assert(casts==before+6,'no seventh wind or repeat patrol after melee begins')
+outer:Tick({});assert(not outer.edge_since and not outer.perimeter_done,'completed encounter clears perimeter state')
+c.plan=nil;p.pos=Vector3(0,0,0);goat.pos=Vector3(8,0,0)
 -- 真正右键施法入口：预演时不发RPC，回调再次核对手持，覆盖主机/两种移动预测。
 local oldRPC,oldSend=RPC,SendRPCToServer;local rpcCount=0
 RPC={RightClick=164};SendRPCToServer=function(...) local args={...};assert(args[1]==164 and args[5]==goat);rpcCount=rpcCount+1 end
@@ -36,7 +87,7 @@ assert(not A.CastStaff(p,staff,goat),'wrong held item rejected before any native
 hand=staff;assert(A.CastStaff(p,staff,goat) and rpcCount==0)
 pc.act.preview_cb();assert(rpcCount==1,'rightclick RPC issued only by native preview callback')
 hand=cane;pc.act.preview_cb();assert(rpcCount==1,'late gear switch revokes pending spell')
-hand=staff;pc.locomotor=nil;assert(A.CastStaff(p,staff,goat));pc.act.non_preview_cb();assert(rpcCount==2)
+now=now+.5;hand=staff;pc.locomotor=nil;assert(A.CastStaff(p,staff,goat));pc.act.non_preview_cb();assert(rpcCount==2)
 pc.ismastersim=true;assert(A.CastStaff(p,staff,goat) and rpcCount==2,'host uses normal action without remote RPC')
 busy=true;assert(not A.CastStaff(p,staff,goat),'busy controller reports rejection instead of false success')
 RPC=oldRPC;SendRPCToServer=oldSend;GetTime=oldTime;ACTIONS.CASTSPELL=savedSpell

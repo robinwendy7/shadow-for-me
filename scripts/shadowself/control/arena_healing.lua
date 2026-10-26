@@ -19,14 +19,63 @@ function H:Count(name)
  end end
  return n
 end
+function H:Tea(c)
+ if c.plan and c.plan.arena_wave and c.plan.arena_wave()>=9 and GetTime()<(self.player.shadowself_tea_after or 0) then return end
+ if not c.plan or not c.plan.arena or not c.plan.arena_wave or c.plan.arena_wave()<9 and not c.waiting_crab then return end
+ local sanity=self.player.replica and self.player.replica.sanity
+ local current=sanity and sanity.GetCurrent and sanity:GetCurrent()
+ if type(current)~="number" or current>=170 then return end
+ for _,item in ipairs(A.Items(self.player)) do
+  if item.prefab=="sweettea" and item:IsValid() and GetTime()>=(self.failed[item.GUID] or 0) and Food.Health(item,self.player)>0 then return item end
+ end
+end
+function H:SanityFood(c)
+ if not c.plan or not c.plan.arena or not c.plan.arena_wave or c.plan.arena_wave()<11 then return end
+ local sanity=self.player.replica and self.player.replica.sanity
+ local current=sanity and sanity.GetCurrent and sanity:GetCurrent()
+ if type(current)~="number" or current>=100 then return end
+ local best,score
+ for _,item in ipairs(A.Items(self.player)) do
+  if item:IsValid() and not Food.BuffOnly(item) and item.prefab~="sweettea"
+   and GetTime()>=(self.failed[item.GUID] or 0) then
+   local value=Food.Sanity(item,self.player)
+   if value>0 and (not score or value>score) then best,score=item,value end
+  end
+ end
+ return best
+end
+function H:WaitFood(c)
+ if not c.waiting_crab then return end
+ local hunger=self.player.replica and self.player.replica.hunger
+ local current=hunger and hunger.GetCurrent and hunger:GetCurrent()
+ local maximum=hunger and hunger.Max and hunger:Max()
+ if type(current)~="number" or type(maximum)~="number" or maximum<=0 or current/maximum>=.8 then return end
+ local best,score
+ for _,item in ipairs(A.Items(self.player)) do
+  if item:IsValid() and not Food.BuffOnly(item) and GetTime()>=(self.failed[item.GUID] or 0) then
+   local food=Food.Hunger(item,self.player);local value=math.min(maximum-current,food)-math.max(0,food-(maximum-current))
+   if food>0 and (not score or value>score) then best,score=item,value end
+  end
+ end
+ return best,false
+end
 function H:Choose(c)
+ local chosen=c.plan and c.plan.arena and c.plan.arena_wave and c.plan.arena_wave()==11 and c.stage11_food_item
+ if chosen and chosen:IsValid() and (not Food.BuffOnly(chosen) or c.stage11_food_mode=="buff") then
+  for _,item in ipairs(A.Items(self.player)) do if item==chosen and Food.Health(item,self.player)>0 then return item,true,Food.Health(item,self.player) end end
+ end
+ local hp,max=self:Health()
+ local sanity=self:SanityFood(c)
+ if sanity and (not hp or not max or hp/max>.4) then return sanity,true,Food.Health(sanity,self.player) end
+ local tea=self:Tea(c);if tea then return tea,true,Food.Health(tea,self.player) end
  local hp,max,missing=self:Health();if not hp or hp<=0 then return end
  local critical=hp/max<=.4
- if missing<8 or hp/max>(c.intermission and .94 or .75) then return end
+ if c.full_recovery and missing<=0 or not c.full_recovery and (missing<8 or hp/max>(c.intermission and .94 or .75)) then return self:WaitFood(c) end
  local best,score,health
- for _,item in ipairs(A.Items(self.player)) do if item:IsValid() and GetTime()>=(self.failed[item.GUID] or 0) then
+ local tea_policy=c.plan and c.plan.arena and c.plan.arena_wave and c.plan.arena_wave()>=9
+ for _,item in ipairs(A.Items(self.player)) do if item:IsValid() and not Food.BuffOnly(item) and not (tea_policy and item.prefab=="sweettea") and GetTime()>=(self.failed[item.GUID] or 0) then
   local heal=Food.Health(item,self.player)
-  if heal>0 and (critical or heal<=missing*1.6) then
+  if heal>0 and (c.full_recovery or critical or heal<=missing*1.6) then
    local effective=math.min(missing,heal);local waste=math.max(0,heal-missing)
    local value=effective*(critical and 4 or 2)-waste*2-Food.Duration(item)*3+(1-Food.Freshness(item))*2
    if not score or value>score or value==score and item.GUID<best.GUID then best,score,health=item,value,heal end
@@ -69,7 +118,7 @@ function H:Safe(c,point,window)
  end
  return true
 end
-function H:Release(c,eating) self.seeking=nil end
+function H:Release(c,eating) self.seeking=nil;require("shadowself/control/arena_pickup_travel").Release(self) end
 -- 打断只释放回血自己的操作权；迟到的网络确认仍继续观察，不再站着等。
 function H:Interrupt(c)
  self:Release(c);self.draining_until=nil;self.seek_after=GetTime()+.5
@@ -92,17 +141,21 @@ function H:Path(c,point)
  return true
 end
 function H:GroundFood(c)
+ if c.waiting_crab then return false end -- 船上待战只消耗已携带补给，不追地面食物。
  local hp,max,missing=self:Health()
- if not hp or hp/max>.65 or missing<8 or not c.plan or not c.plan.arena_ground then return false end
+ if not hp or c.full_recovery and missing<=0 or not c.full_recovery and (hp/max>.65 or missing<8) or not c.plan or not c.plan.arena_ground then return false end
  if self.player.components.playercontroller:IsBusy() or self.player:HasTag("attack")
   or c.h and c.h.shadowself_dodging or c.gear and (c.gear.action_hold or c.gear.pending) then return false end
  local p=self.player:GetPosition();if not self:Safe(c,p,.25) then return false end
  local best,score,duration
  for _,item in ipairs(c.plan.arena_ground()) do
   if item:IsValid() and GetTime()>=(self.failed[item.GUID] or 0) then
+   local wave=c.plan.arena_wave and c.plan.arena_wave() or 1
+   local allowed=not Food.BuffOnly(item) and require("shadowself/control/arena_policy").PickupAllowed(item,wave,self.player)
+    and (wave<7 or require("shadowself/control/arena_inventory").Want(item,A.Items(self.player),self.player,wave))
    local heal=Food.Health(item,self.player);local q=item:GetPosition();local d=math.sqrt(p:DistSq(q))
    local window=d/math.max(3.5,c.Speed and c:Speed() or 6)+Food.Duration(item)+.4
-   if heal>0 and d<=3 and self:Safe(c,q,window) and self:Path(c,q) then
+    if allowed and heal>0 and d<=(c.full_recovery and 20 or 3) and self:Safe(c,q,window) and self:Path(c,q) then
     local value=math.min(missing,heal)-d*3
     if not score or value>score then best,score,duration=item,value,window end
    end
@@ -110,6 +163,7 @@ function H:GroundFood(c)
  end
  if not best then return false end
  c.bridge:PauseAttack()
+ if not require("shadowself/control/arena_pickup_travel").Ready(self,self.player,c.plan.arena_wave and c.plan.arena_wave() or 1,best,c) then return true end
  if A.Scene(self.player,best,ACTIONS.PICKUP) then
   self.pending={kind="pickup",item=best,guid=best.GUID,untiltime=GetTime()+duration,deadline=GetTime()+math.max(3,duration+1)}
   c.status="角斗场 · 安全空档拾取附近回血料理";return true
@@ -177,6 +231,7 @@ function H:Tick(c)
  if pending then
   if pending.kind=="pickup" then
    for _,item in ipairs(A.Items(self.player)) do if item==pending.item then
+    require("shadowself/control/arena_pickup_travel").Release(self)
     self.pending=nil;self.next_try=now+.1;return true
    end end
    if not pending.item:IsValid() or now>=pending.deadline then
@@ -192,8 +247,16 @@ function H:Tick(c)
     if a:IsCurrentAnimation(name) then pending.saw_eat=true;break end
    end
   end
-  local healed=pending.saw_eat and not pending.interrupted and now>=pending.untiltime and hp>pending.health+.1
+  local hunger=self.player.replica and self.player.replica.hunger
+  local current_hunger=hunger and hunger.GetCurrent and hunger:GetCurrent()
+  local nourished=pending.stage11_food and type(current_hunger)=="number" and type(pending.hunger)=="number" and current_hunger>pending.hunger+.1
+  local sr=self.player.replica and self.player.replica.sanity
+  local san=sr and sr.GetCurrent and sr:GetCurrent()
+  local restored=pending.sanity_food and type(san)=="number" and san>(pending.sanity_before or san)+.1
+  local healed=pending.saw_eat and not pending.interrupted and now>=pending.untiltime and (hp>pending.health+.1 or nourished or restored)
   if self:Count(pending.name)<pending.count or healed then
+   if pending.name=="sweettea" then self.player.shadowself_tea_after=now+60 end
+   require("shadowself/control/supplies").Record(self.player,pending.name,self:Count(pending.name)<pending.count and "inventory_consumed" or "food_recovery_after_eat")
    self.pending=nil;self.next_try=now+.5;self:Release(c)
    return pc:IsBusy()
   elseif now>=pending.deadline then
@@ -238,10 +301,19 @@ function H:Tick(c)
  self:Release(c,true)
  c.bridge:PauseAttack()
  local count=self:Count(item.prefab)
+ local sanity_item=item==self:SanityFood(c)
  if c.intermission then A.Stop(self.player) end
  if A.Self(self.player,item,ACTIONS.EAT) then
   self.pending={name=item.prefab,guid=item.GUID,count=count,health=hp,start_deadline=now+math.max(.35,delay*2+.1),untiltime=now+window,deadline=now+math.max(3,window+1.5)}
-  self.next_try=now+.3;c.status="角斗场 · 安全空档吃回血料理";return true
+  if sanity_item then
+   local sr=self.player.replica.sanity
+   self.pending.sanity_food=true;self.pending.sanity_before=sr:GetCurrent()
+  end
+  if c.stage11_food_item==item and c.plan and c.plan.arena and c.plan.arena_wave and c.plan.arena_wave()==11 then
+   local hunger=self.player.replica and self.player.replica.hunger
+   self.pending.stage11_food=true;self.pending.hunger=hunger and hunger.GetCurrent and hunger:GetCurrent()
+  end
+  self.next_try=now+.3;c.status=item.prefab=="sweettea" and "角斗场 · SAN低于170，饮用舒缓茶" or "角斗场 · 安全空档吃回血料理";return true
  end
  self.failed[item.GUID]=now+3;self.next_try=now+.3;return false
 end

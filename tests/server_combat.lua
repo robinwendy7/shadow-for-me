@@ -47,7 +47,15 @@ assert(gear:Weapon()==sword,"arena trap guards prohibit whip despite crowd range
 gear.forced_weapon=whip;assert(gear:Weapon()==sword,"forced whip cannot bypass trap prohibition");gear.forced_weapon=nil
 c.plan.arena_no_whip=function() return false end
 assert(gear:Weapon()==whip,"whip available again when trap guards removed")
+c.enemies={hound};c.plan.arena_whip=function() return true end
+assert(gear:Weapon()==whip,'fish/frog wave temporarily selects whip even below the generic crowd threshold')
+c.plan.arena_no_whip=function() return true end
+assert(gear:Weapon()==sword,'distance guard overrides temporary whip preference inside trap boundary')
+c.plan.arena_whip=nil
 c.plan=nil
+local bat=weapon('ruins_bat');items={sword,bat};c.plan={arena=true,arena_wave=function() return 8 end}
+assert(gear:Weapon()==bat,'eighth-wave combat uses the owned ruins bat over higher raw damage alternatives')
+c.plan=nil;items={sword,whip,star}
 local boss=ent("antlion");boss.tags.epic=true;c.target=boss
 assert(gear:Weapon()==sword,"boss target ignores crowd range preference")
 c.target=hound;c.enemies={hound,ent("sandspike_tall"),ent("sandspike_med"),ent("sandspike_short"),ent("sandblock"),ent("crabking_icewall")}
@@ -59,6 +67,15 @@ local rook,knight,bishop=ent("rook",2,0),ent("knight",4,0),ent("bishop",6,0)
 c.h.selected_ents={[rook]=true,[knight]=true,[bishop]=true}
 assert(Policy.Other(c.bridge,rook)==knight,"rook deprioritized even when nearer")
 c.h.selected_ents={[rook]=true};assert(not Policy.Other(c.bridge,rook),"last remaining rook becomes attackable")
+local remnants={rook,knight,bishop}
+c.bridge.plan={arena=true,arena_wave=function() return 3 end,arena_remaining=function() return remnants end}
+c.h.selected_ents={[rook]=true,[knight]=true,[bishop]=true}
+assert(not Policy.ClockworkRook(c.bridge),'living bishop prevents the rook endgame')
+remnants={rook,knight};assert(Policy.Nearest(c.bridge)==rook and not Policy.Other(c.bridge,rook),'wave3 endgame chooses rook even with a nearer knight')
+rook.tags.dead=true;assert(Policy.Nearest(c.bridge)==knight,'rook death releases the final knight')
+rook.tags.dead=nil;c.bridge.plan.arena_wave=function() return 2 end
+assert(Policy.Nearest(c.bridge)==knight,'other waves retain rook-last policy')
+c.bridge.plan=nil
 -- 真实Secondary.Wrap必须处理exclusive专用走位，检查其他发条近身圈及冲撞扫掠线。
 local primary=ent("bishop",0,0);primary.anim="atk2_loop";p.pos=Vector3(4,0,0)
 knight.pos=Vector3(2,0,4);knight.anim="idle"
@@ -93,10 +110,11 @@ end
 local ant=ent("antlion",0,0);p.pos=Vector3(6,0,0);c.enemies={ant};c.gear=gear
 c.hazards={};c.mechanisms={zones={{pos=Vector3(4,0,0),radius=1.1}}}
 local ar=require("shadowself/control/routes")({c=c});ar.ant_clearing=true;ar.ant_exit=Vector3(6,0,3)
-local mode=ar:AntRecover(ant);assert(not mode and not ar.ant_clearing and not ar.ant_exit,"removed recovery mode never takes over antlion movement")
+ar.boss.Move=function(_,q) assert(q:DistSq(p.pos)>0);return 'move',ant end
+local mode=ar:AntRecover(ant);assert(mode=='move' and not ar.ant_clearing and not ar.ant_exit,"blocked return corridor continues circular avoidance before resuming attacks")
 c.mechanisms=nil;c.hazards={};assert(not ar:AntRecover(ant) and not ar.ant_clearing,"safe return corridor immediately restores normal combat")
 -- 帝王蟹实际状态流程：飞蟹落地 -> 正常PLAY -> 确认入睡 -> 普攻破冰 -> 本体。
-local king=ent("crabking",0,0);king.tags.epic=true;king.tags.icewall=true
+local king=ent("crabking",0,0);king.tags.epic=true;king.tags.icewall=true;king.tags.notarget=true
 local mob=ent("crabking_mob",5,0);mob.anim="boat_jump_loop"
 local wall=ent("crabking_icewall",2,0);local flute=ent("panflute")
 entities={king,mob,wall};items={flute,sword};c.enemies={king,mob};p.pos=Vector3(3,0,0);busy=false;c.gear=gear;c.h.ent=king
@@ -109,9 +127,13 @@ assert(mode=="support" and plays==1 and gear.action_hold and crab.pending,"lande
 now=12;crab:Tick(king);assert(plays==1,"no duplicate flute while pending")
 mob.anim="sleep_loop";busy=false;p.anim="idle";now=12.6
 mode=crab:Tick(king);assert(mode=="attack" and c.h.ent==wall and crab:Allowed(wall) and not crab:Allowed(mob) and not gear.action_hold,"only confirmed sleep unlocks ice-wall attacks")
-wall.valid=false;king.tags.icewall=nil;now=13;mode=crab:Tick(king)
+king.tags.notarget=nil;now=12.7;mode=crab:Tick(king)
+assert(mode=='attack' and c.h.ent==king and king.tags.icewall and wall.valid and not crab:Allowed(wall),'first actual targetability update returns to king even while ice tag and walls remain')
+mob.anim='idle';now=12.8;mode=crab:Tick(king)
+assert(mode=='attack' and c.h.ent==king and plays==1,'king output window cannot regress to re-fluting awakened minions')
+wall.valid=false;king.tags.icewall=nil;king.tags.notarget=nil;now=13;mode=crab:Tick(king)
 assert(mode=="attack" and c.h.ent==king and not crab:Allowed(wall),"ice stage ends back on king only")
-king.tags.icewall=true;wall.valid=true;mob.anim="idle";now=15;crab:Tick(king);now=16.2;crab:Tick(king)
+king.tags.icewall=true;king.tags.notarget=true;wall.valid=true;mob.anim="idle";now=15;crab:Tick(king);now=16.2;crab:Tick(king)
 assert(plays==2,"new ice phase requires a fresh sleep cycle")
 busy=false;now=19.3;crab:Tick(king);now=20;crab:Tick(king);assert(plays==3,"sleep resistance/failed effect retries PLAY instead of assuming success")
 -- 走位中断吹奏后立即释放装备锁，不会阻止拿手杖；之前的赶路换装要能确认。

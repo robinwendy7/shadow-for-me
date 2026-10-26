@@ -22,9 +22,11 @@ assert(not io.open("scripts/shadowself/control/attackwindow.lua","r"),"generic b
 local boss={c=c};local routes=require("shadowself/control/routes")(boss)
 local ant=ent("antlion",0,0,4);p.pos=Vector3(4.6,0,0);ant.anim="cast_pre";ant.frame=5;c.attack_windows=nil
 local data=routes:Dodge(ant,false);local q=data:fn()
-assert(q.z<0 and q:DistSq(p.pos)>=1.7^2 and q:DistSq(p.pos)<=2.25^2,"body-touching ant gets short tangent, not rejected circular chord")
-p.pos=q;assert(not routes:Dodge(ant,false));ant.anim="cast_pst";assert(not routes:Dodge(ant,false))
-ant.anim="cast_pre";ant.frame=5;data=routes:Dodge(ant,false);assert(data and data:fn():DistSq(p.pos)>1,"every real cast resets even when same frame is first observed")
+assert(q.z<0 and q:DistSq(p.pos)<1.1^2 and q:DistSq(ant.pos)>=4.6^2-.02,"body-touching ant uses short sampled arc segments without cutting through its collision body")
+p.pos=q
+for i=1,25 do local next=routes:Dodge(ant,false);if not next then break end;p.pos=next:fn() end
+assert(not routes:Dodge(ant,false));ant.anim="cast_pst";assert(not routes:Dodge(ant,false))
+ant.anim="cast_pre";ant.frame=5;data=routes:Dodge(ant,false);assert(data and data:fn():DistSq(p.pos)>.05,"every real cast resets even when same frame is first observed")
 c.actions.SafePoint=function() return false end;routes.antlion=nil;data=routes:Dodge(ant,false);assert(data and routes:Dodge(ant,false) and not routes.antlion.done,"no route must not mark this and future casts as completed")
 c.actions.SafePoint=function() return true end
 -- 侧方预备阶段已经抢占，不等冲刺本体碰到近身圆。

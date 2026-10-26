@@ -59,35 +59,24 @@ assert(math.abs(restored:GetPosition().x-x)<.001 and math.abs(restored:GetPositi
 width,height=2560,1440;restored:OnUpdate(.016)
 assert(math.abs(restored:GetPosition().x-x*4/3)<.001 and math.abs(restored:GetPosition().y-y*4/3)<.001,"position adapts to changed resolution")
 held=true;panel.input.OnMouseButton(panel.input,MOUSEBUTTON_RIGHT,true);panel:Kill();assert(panel.killed and not panel.input.editing and not panel.drag)
-local accepted=0
-function r.control:HandleText(text) assert(text=="同意接管");accepted=accepted+1;self.pending=nil;return true end
 local Consent=require("widgets/shadowselfconsent")
-local consent=Consent(r);consent:OnUpdate();assert(not consent.button.shown,"no request, no control button")
+local consent=Consent(r);consent:OnUpdate();assert(not consent.button and not consent.stop.shown,"no separate feet consent button")
 r.control.pending={until_time=now+20};consent:OnUpdate()
-assert(consent.button.shown and consent:GetPosition().x==100 and consent:GetPosition().y==174,"request button follows actual player feet projection")
-consent.button.click();assert(accepted==1 and not r.control.pending and not consent.button.shown)
-consent.button.click();assert(accepted==1,"absent request never starts autonomous takeover")
-r.control.pending={until_time=now+20};consent:OnUpdate();r.control.pending={until_time=now+20};consent.button.click()
-assert(accepted==1,"stale click cannot approve a replacement request")
-consent:OnUpdate();now=now+21;consent:OnUpdate();assert(not consent.button.shown)
-consent.button.click();assert(accepted==1,"expired consent is not accepted")
-r.control.pending={until_time=now+20};r.dead=true;consent:OnUpdate();assert(not consent.button.shown)
+assert(not consent.stop.shown,"pending approval belongs to inventory HUD only")
 r.dead=false;r.control.pending=nil;r.control.phase="active";consent:OnUpdate()
-assert(not consent.button.shown and consent.stop.shown,"active takeover shows only feet stop button")
+assert(consent.stop.shown and consent:GetPosition().x==100 and consent:GetPosition().y==174,"stop still follows actual player feet projection")
 local stopped=0
-local approve=r.control.HandleText
 function r.control:HandleText(text)
     if text=="停止接管" then stopped=stopped+1;self.phase=nil;self.pending=nil;return true end
-    return approve(self,text)
 end
 consent.stop.click();assert(stopped==1 and not r.control.phase and not consent.stop.shown)
 consent.stop.click();assert(stopped==1,"stale stop click cannot start another takeover")
 r.control.phase="diving";consent:OnUpdate();assert(consent.stop.shown,"can cancel possession transition from feet")
 consent.stop.click();assert(stopped==2 and not consent.stop.shown)
 r.control.phase="active";r.control.pending={until_time=now+20};consent:OnUpdate()
-assert(consent.stop.shown and consent.button.shown and consent.button:GetPosition().x<consent.stop:GetPosition().x,"new task consent keeps stop available alongside")
-r.dead=true;consent:OnUpdate();assert(not consent.stop.shown and not consent.button.shown)
-print("PASS: input-only chat, no transcript/history, enter-only send, right drag/save/resize; feet consent and stop retained")
+assert(consent.stop.shown and not consent.button,"pending replacement retains feet stop without a duplicate consent")
+r.dead=true;consent:OnUpdate();assert(not consent.stop.shown)
+print("PASS: input-only chat, no transcript/history, enter-only send, right drag/save/resize; feet stop retained without consent duplicate")
 
 -- The floating personality picker belongs to the local shadow, not the chat HUD.
 local changed
@@ -110,7 +99,7 @@ assert(require("shadowself/personality").Resolve({personality="INFP",personality
 print("PASS: local-shadow right-click -> head MBTI button -> sixteen choices, restore, timeout, possession/buried hiding and saved personality migration")
 
 -- The inventory button follows BODY slot, not fixed screen coordinates.
-r.dead=false;r.control.phase=nil;r.destroyed=false
+r.dead=false;r.control.phase=nil;r.control.pending=nil;r.destroyed=false
 EQUIPSLOTS=EQUIPSLOTS or {BODY="body"}
 local clicked=0;r.control.CombatButton=function(self) clicked=clicked+1;if self.phase then self.phase=nil else self.phase="diving" end end
 local inventory=Fake();inventory.equip={}
@@ -138,6 +127,9 @@ local button=inventory:AddChild(Combat(r,inventory));button:OnUpdate()
 assert(button.shown and button:GetPosition().x==200 and button:GetPosition().y==98,"button sits 48 local units above actual armor slot: "..tostring(button:GetPosition().x)..","..tostring(button:GetPosition().y).." scale="..tostring(inventory:GetScale().x))
 button.button.click();assert(clicked==1 and button.button.label=="停止接管","combat click grants consent and updates stop state")
 button.button.click();assert(clicked==2 and button.button.label=="战斗接管")
+r.control.pending={until_time=now+20};button:OnUpdate()
+assert(button.button.label=="同意接管","pending task uses the existing inventory button for consent")
+r.control.pending=nil
 inventory.equip[EQUIPSLOTS.BODY]={GetWorldPosition=function() return {x=700,y=250} end};button:OnUpdate()
 assert(button:GetPosition().x==300 and button:GetPosition().y==148,"inventory slot rebuild/scaling does not orphan button")
 inventory.equip[EQUIPSLOTS.BODY]=nil;button:OnUpdate();assert(not button.shown,"no armor slot hides button without a guessed position")

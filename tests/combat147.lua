@@ -65,7 +65,13 @@ for frame=0,16 do
  if frame>=2 and distance>0 then local step=math.min(distance,7.5/30);p.pos=Vector3(p.pos.x+dx/distance*step,0,p.pos.z+dz/distance*step) end
  if frame==16 then assert(not ((p.pos.x-2)^2+p.pos.z^2<4^2 and p.pos.x>.25),'shark must clear actual offset arc before frame16 impact') end
 end
-local q=Shark.Dodge(sc,shark,false):fn();assert(q:DistSq(p.pos)<.001,'hold once outside damage slice, no unnecessary full orbit')
+assert(Shark.Dodge(sc,shark,false),'clearing the narrow damage boundary alone cannot stop the requested rear orbit')
+for i=1,35 do
+ local data=Shark.Dodge(sc,shark,false);if not data then break end
+ local q=data:fn();local dx,dz=q.x-p.pos.x,q.z-p.pos.z;local d=math.sqrt(dx*dx+dz*dz)
+ if d>0 then local step=math.min(d,7.5/30);p.pos=Vector3(p.pos.x+dx/d*step,0,p.pos.z+dz/d*step) end
+end
+assert(Shark.Rear(sc,shark) and not Shark.Dodge(sc,shark,false),'reach the actual back before immediately restoring attack')
 package.loaded['shadowself/control/navigation']=oldNav;package.loaded['shadowself/control/sharkroute']=nil
 ThePlayer,GetTime,TheWorld,TUNING,TheNet,TheSim=saved.player,saved.time,saved.world,saved.tuning,saved.net,saved.sim
 print('PASS: repeated close dragon windups; live equipped speed; attack-tag cane; supervisor same-frame escape replay; nearest follow-up; actual 240-degree offset shark arc at7.5/22ms')

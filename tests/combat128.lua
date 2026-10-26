@@ -45,13 +45,17 @@ TheSim.FindEntities=function(_,x,y,z,radius)
  local out={};for _,e in ipairs(entities) do if e.pos:DistSq(Vector3(x,0,z))<=radius^2 then out[#out+1]=e end end;return out
 end
 local tuning={};local h={};local hits,moves=0,0
+local lastCloseForce
 h.GetAttackTargets=function(self,range)
- self.selected_ents={};for _,e in ipairs(TheSim:FindEntities(p.pos.x,0,p.pos.z,range)) do self.selected_ents[e]=true end
+ self.selected_ents={};for _,e in ipairs(TheSim:FindEntities(p.pos.x,0,p.pos.z,range)) do
+  if not p.replica.combat:IsAlly(e) then self.selected_ents[e]=true end
+ end
 end
 h.GetClosestTarget=function(self) for e in pairs(self.selected_ents) do return e end end
 h.PreTheLoop=function() end;h.IsAttackPre=function() return false end;h.DoDodge=function() end
 h.CancelDodgingAtk=function() end
 for _,name in ipairs({"OnKeyFrame","OnNormalFrame","CloseAndAttack","ShouldAtkWhenDodging"}) do h[name]=function() hits=hits+1;return true end end
+h.CloseAndAttack=function(_,target,force) hits=hits+1;lastCloseForce=force;return true end
 h.StartHitAndRun=function() tuning.Cheatthread={id=81,SetList=function() end} end
 h.StopHitAndRun=function() tuning.Cheatthread=nil end
 local n={HitAndRun=h,TUNING=tuning,MOD_util={},ENT_util=require("shadowself/native").context.ENT_util,POS_util={GoToPoint=function(_,x,z) moves=moves+1;c.moved=Vector3(x,0,z) end},KEY_util={MoveKeyDown=function() return false end}}
@@ -130,6 +134,137 @@ assert(bridge.allowed(king) and bridge.allowed(wall) and not bridge.allowed(crab
 before=hits;h:CloseAndAttack(crabmob);assert(hits==before,"captured crab minion follow-up blocked in actual attack wrapper")
 bridge.priority_target=wall;assert(h:GetClosestTarget()==wall,"break ice explicitly picks its allowed wall through actual native picker")
 c.crabking=nil
+local sleepingEscort=entity('icehound',3,0);sleepingEscort.tags.sleeping=true;sleepingEscort.replica.combat={}
+local sleepingTrap=entity('icehound',4,0);sleepingTrap.tags.sleeping=true;sleepingTrap.replica.combat={}
+local oldArena,oldContains,oldHunt=bridge.plan.arena,bridge.plan.arena_contains,bridge.plan.arena_walrus
+bridge.plan.arena=true;bridge.plan.arena_contains=function() return true end
+bridge.plan.arena_walrus={Escort=function(_,e) return e==sleepingEscort end}
+assert(bridge.allowed(sleepingEscort) and not bridge.allowed(sleepingTrap),'actual native target filter distinguishes flute-controlled escort from a sleeping trap')
+bridge.plan.arena=oldArena;bridge.plan.arena_contains=oldContains;bridge.plan.arena_walrus=oldHunt
+-- Actual supervisor: a distant stopped rook resumes normal ATTACK approach,
+-- rather than handing the character to the generic GoToPoint chase first.
+c.plan=bridge.plan;c.plan.arena=true;c.plan.arena_wave=function() return 3 end
+c.plan.arena_remaining=function() return {rook,knight} end
+c.plan.arena_contains=function() return true end
+entities={rook,knight};rook.pos=Vector3(0,0,0);knight.pos=Vector3(0,0,-15);p.pos=Vector3(12,0,0)
+rook.anim='idle';c.bosses=b;b.rooks[rook]={ready=true,hits=0}
+bridge.priority_target=rook;bridge.resume_target=nil;bridge.chasing=true;c.travel.chasing=true
+c.blocked=false;c.special_active=false;c.queen_active=false;c.next_scan=nil;now=12
+local oldMoves=moves
+assert(coroutine.resume(routines[bridge.supervisor]))
+assert(bridge:OwnsThread() and not bridge.chasing and moves==oldMoves,'stopped rook outside melee reach starts native attack without a walk-to-face phase')
+rook.anim='atk_pre';rook.frame=0;c.next_scan=nil;now=12.1
+assert(coroutine.resume(routines[bridge.supervisor]))
+assert(not bridge:OwnsThread() and moves>oldMoves and math.abs(c.moved.z)>=2.2,'actual supervisor interrupts attack and dispatches lateral movement on the first rook preparation frame')
+-- Actual bridge: both walrus targets hold ground and suppress ordinary retreat;
+-- the state ends for the escort dog.
+local walrus=entity('walrus',0,0)
+local hunt=require('shadowself/control/arena_walrus')({player=p})
+hunt.active=true;hunt.control_done=true;hunt.target=walrus;hunt.engaged[walrus]=true
+c.plan.arena_wave=function() return 2 end;c.plan.arena_walrus=hunt;h.ent=walrus
+assert(h.shadowself_hold_ground() and not h:IsAttackPre(walrus,1) and c.secondary:Focus()==walrus,'engaged walrus uses actual hold-ground and attack focus hooks')
+walrus.prefab='little_walrus'
+assert(h.shadowself_hold_ground() and not h:IsAttackPre(walrus,1),'little walrus also suppresses ordinary attack retreat')
+hunt.target=sleepingEscort;h.ent=sleepingEscort
+assert(not h.shadowself_hold_ground() and not c.secondary:Focus(),'escort does not inherit walrus hold-ground')
+c.plan.arena_walrus=nil
+local small=entity('smallbird',12,0);local teen=entity('teenbird',8,0);local adult=entity('tallbird',1,0)
+local savedAlly=p.replica.combat.IsAlly
+for _,bird in ipairs({small,teen}) do
+ bird.tags.companion=true;bird.tags.sleeping=true
+ bird.replica.combat={GetTarget=function() end}
+end
+adult.tags.sleeping=true;adult.replica.combat={GetTarget=function() end}
+p.replica.combat.IsAlly=function(_,e)
+ return e:HasTag('companion') and (not e.replica.combat or e.replica.combat:GetTarget()~=p)
+end
+entities={small,teen,adult};c.plan.arena_remaining=function() return entities end
+bridge.priority_target=adult;h.selected_ents={[small]=true,[teen]=true,[adult]=true};h.ent=adult
+assert(p.replica.combat:IsAlly(small) and p.replica.combat:IsAlly(teen),'actual sleep/companion ally classification is reproduced')
+assert(bridge.allowed(small) and bridge.allowed(teen),'sleeping arena birds remain eligible despite companion-based ally classification')
+bridge.wrappers.GetAttackTargets.old(h,30)
+assert(not h.selected_ents[small] and not h.selected_ents[teen],'original native scan drops both companion birds')
+h:GetAttackTargets(30)
+assert(h.selected_ents[small] and h.selected_ents[teen],'owned scan restores only current arena roster birds')
+assert(h:GetClosestTarget()==small,'real target picker follows smallbird before closer teen/adult birds')
+before=hits;h:CloseAndAttack(adult);assert(hits==before,'captured larger-bird followup cannot bypass kill order')
+h.ent=small;c.blocked=false;bridge.chasing=nil
+before=hits;h:CloseAndAttack(small)
+assert(hits==before+1 and lastCloseForce==true,'actual attack bridge requests normal forced attack for the sleeping arena chick in non-prediction mode')
+c.plan.arena_bird_committed=function(e)
+ return c.plan.arena_wave()==2 and e and ({smallbird=true,teenbird=true,tallbird=true})[e.prefab] or false
+end
+assert(h.shadowself_hold_ground() and not h:IsAttackPre(small,1) and c.secondary:Focus()==small,'tallbird opening commits the selected smallest bird without attack retreat')
+local savedMechanisms,savedHealing,savedSupplies=c.mechanisms,c.healing,c.supplies
+c.mechanisms={Tick=function() error('continuous bird attacks cannot hand control to optional support') end,Dodge=function(_,_,data) return data end}
+c.healing={Tick=function() error('continuous bird attacks cannot retreat for optional healing') end,BlockAttack=function() return false end}
+c.supplies={Tick=function() error('continuous bird attacks cannot retreat for optional buffs') end}
+h.shadowself_dodging=nil;c.next_scan=nil;c.blocked=false;c.special_active=false;now=12.5
+local birdMoves=moves
+assert(coroutine.resume(routines[bridge.supervisor]))
+assert(moves==birdMoves and bridge:OwnsThread(),'actual supervisor keeps native attacks and does not issue retreat/chase movement for the committed bird')
+c.mechanisms,c.healing,c.supplies=savedMechanisms,savedHealing,savedSupplies
+local pet=entity('smallbird',2,0);pet.tags.companion=true;pet.replica.combat={GetTarget=function() end}
+pet.replica.follower={GetLeader=function() return p end};entities[#entities+1]=pet
+assert(not bridge.allowed(pet),'player-owned bird is not included in the arena ally exception')
+local outsider=entity('smallbird',1,0);outsider.tags.companion=true;outsider.replica.combat={GetTarget=function() end}
+assert(not bridge.allowed(outsider),'same prefab outside the current arena roster remains excluded')
+small.replica.health={IsDead=function() return true end}
+assert(h:GetClosestTarget()==teen,'replicated death immediately advances priority even before dead tags arrive')
+small.replica.health=nil
+small.tags.dead=true;h.ent=h:GetClosestTarget();assert(h.ent==teen and h.shadowself_hold_ground() and not h:IsAttackPre(teen,1),'confirmed smallbird death advances to continuous teenbird attacks')
+teen.tags.dead=true;h.ent=h:GetClosestTarget();assert(h.ent==adult and h.shadowself_hold_ground() and not h:IsAttackPre(adult,1),'confirmed teenbird death advances to continuous tallbird attacks')
+c.plan.arena_wave=function() return 3 end
+small.tags.dead=nil;assert(not bridge.allowed(small),'companion exception ends outside the second wave')
+p.replica.combat.IsAlly=savedAlly
+-- Actual bridge: every native attack entry is blocked throughout bishop aim/charge/emission.
+local bishop=entity('bishop_nightmare',0,0);entities={bishop};c.plan.arena_wave=function() return 3 end
+c.plan.arena_remaining=function() return entities end
+local rhythm=require('shadowself/control/arena_clockwork')(bishop);c.plan.arena_clockwork=rhythm
+bridge.priority_target=bishop;bridge.chasing=nil;h.ent=bishop;c.blocked=false;c.special_active=false
+bridge:ResumeAttack();c.bosses=b;b.entities={};c.healing=nil;c.supplies=nil
+before=hits
+for _,name in ipairs({'atk2_pre','atk2_loop','atk2_pst'}) do
+ bishop.anim=name
+ for _,f in ipairs({0,999}) do
+  bishop.frame=f
+  h:OnKeyFrame();h:OnNormalFrame();h:CloseAndAttack(bishop);h:ShouldAtkWhenDodging(bishop)
+  local dodge=h:IsAttackPre(bishop,1)
+  assert(hits==before and dodge and dodge.noattack,'all four actual native attack entries remain blocked for the entire real bishop state, independent of frame')
+ end
+end
+local scans=0
+c.mechanisms={Scan=function() scans=scans+1 end,Tick=function() error('bishop aiming must not hand control to mechanism actions') end,Dodge=function(_,_,data) return data end}
+c.healing={Tick=function() error('healing cannot steal bishop aiming movement') end,BlockAttack=function() return false end}
+c.supplies={Tick=function() error('supplies cannot steal bishop aiming movement') end}
+h.shadowself_dodging=bishop;c.next_scan=nil;now=14
+assert(coroutine.resume(routines[bridge.supervisor]));assert(scans==1 and hits==before,'actual supervisor refreshes marks read-only while native dodge owns movement')
+h.shadowself_dodging=nil;bishop.anim='idle';c.blocked=false
+h:CloseAndAttack(bishop);assert(hits==before+1 and h.shadowself_hold_ground(),'actual state exit immediately releases attacks')
+bishop.anim='atk2_pre';bishop.frame=0;h:CloseAndAttack(bishop)
+assert(hits==before+2 and not h:IsAttackPre(bishop,1) and h.shadowself_hold_ground(),'after the first dodge later volleys keep continuous output with no extra movement')
+-- 巡游攻击锁作用于四个真实原生入口，不能依赖某一Boss实现刚好返回move。
+c.arena_patrol=true;c.bosses=nil;c.plan.arena_clockwork=nil;before=hits
+h:OnKeyFrame();h:OnNormalFrame();h:CloseAndAttack(bishop);h:ShouldAtkWhenDodging(bishop)
+assert(hits==before,'patrol lock blocks every native melee entry even without a Boss gate')
+c.arena_patrol=nil;c.plan.arena_wave=function() return 6 end
+c.enemies={{prefab='lightninggoat',replica={},IsValid=function() return true end,HasTag=function() return false end}}
+h:OnKeyFrame();h:OnNormalFrame();h:CloseAndAttack(bishop);h:ShouldAtkWhenDodging(bishop)
+assert(hits==before,'electric-goat scene is melee-locked even before the first patrol state update')
+c.enemies={};c.plan.arena_wave=function() return 11 end
+local fish=entity('mermguard_shadow',2,0);local pig=entity('daywalker',3,0)
+entities={fish,pig};c.plan.arena_remaining=function() return entities end
+bridge.priority_target=fish;h.ent=fish;c.blocked=false;bridge.chasing=nil;c.plan.arena_stage11={Allowed=function(_,e) return e==fish end}
+before=hits
+assert(bridge.allowed(pig),'nonpriority pig remains in threat scanning while its attack entries are vetoed')
+h:CloseAndAttack(pig);h:ShouldAtkWhenDodging(pig);h.ent=pig;h:OnKeyFrame();h:OnNormalFrame()
+assert(hits==before,'stage11 cannot hit pig through any of the four captured native attack entries')
+h.ent=fish;c.secondary.pending=nil;c.secondary.next_scan=nil
+h:CloseAndAttack(fish);assert(hits==before+1,'allowed fish still uses the normal native attack entry')
+c.plan.arena_stage11={Allowed=function() return false end};before=hits
+h:OnKeyFrame();h:OnNormalFrame();h:CloseAndAttack(fish);h:ShouldAtkWhenDodging(fish)
+assert(hits==before,'unconfirmed hat/buff or closed worm feeding window blocks every attack entry')
+c.plan.arena_stage11=nil
 bridge:Stop();StartThread,Sleep,KillThreadsWithID,IsSimPaused=oldStart,oldSleep,oldKill,oldPaused
 package.loaded["shadowself/control/actions"]=savedA;require("shadowself/native").context=savedN
 package.loaded["shadowself/control/beequeen"]=nil

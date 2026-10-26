@@ -71,9 +71,19 @@ function Gear:Damage(item)
 end
 function Gear:Weapon()
     local plan=self.combat and self.combat.plan
+    local stage=plan and plan.arena_strategy
+    if stage and stage.weapon and self:Owned(stage.weapon) and E.Usable(self.player,stage.weapon) then return stage.weapon end
     local no_whip=plan and plan.arena and plan.arena_no_whip and plan.arena_no_whip()
     if self.forced_weapon and not (no_whip and self.forced_weapon.prefab=="whip") and self:Owned(self.forced_weapon) and E.Usable(self.player,self.forced_weapon) then return self.forced_weapon end
     local items,hand=self:Items();local best,bestscore
+    if plan and plan.arena and plan.arena_wave and plan.arena_wave()==8 then
+        if hand and hand.prefab=="ruins_bat" and E.Usable(self.player,hand) then return hand end
+        for _,item in ipairs(items) do if item.prefab=="ruins_bat" and E.Usable(self.player,item) then return item end end
+    end
+    if plan and plan.arena and plan.arena_whip and plan.arena_whip() and not no_whip then
+        if hand and hand.prefab=="whip" and E.Usable(self.player,hand) then return hand end
+        for _,item in ipairs(items) do if item.prefab=="whip" and E.Usable(self.player,item) then return item end end
+    end
     local policy=require("shadowself/control/targetpolicy")
     local damage=require("shadowself/control/weapon_damage")
     local target=self.combat.target or self.combat.h and self.combat.h.ent
@@ -82,7 +92,7 @@ function Gear:Weapon()
     local boss=policy.Boss(target)
     local electric=damage.Electric(self.player)
     local wet=target and (target.GetIsWet and target:GetIsWet() or target:HasTag("wet"))
-    for _,item in ipairs(items) do if E.Weapon(self.player,item) and not (no_whip and item.prefab=="whip") and (item.prefab~="nightstick" or wet and not electric) then
+      for _,item in ipairs(items) do if E.Weapon(self.player,item) and not (plan and plan.arena and item.prefab=="torch") and not (no_whip and item.prefab=="whip") and (item.prefab~="nightstick" or wet and not electric) then
         local travel=E.Mult(item)>=1.2 or item.prefab=="cane" or item.prefab=="orangestaff"
         local score=damage.Score(self.player,item,self:Damage(item),target)+(item==hand and .1 or 0)-(travel and 1000 or 0)
         if item.prefab=="nightstick" and electric then score=score-10000 end
@@ -133,7 +143,7 @@ function Gear:Swap(role,snapshot)
     local pc=self.player.components and self.player.components.playercontroller
     local busy=pc and pc.IsBusy and pc:IsBusy()
     local support=self.support_hand
-    if support and (not self:Owned(support.item) or not E.Usable(self.player,support.item)) then self.support_hand=nil;support=nil end
+    if support and (support.valid and not support.valid() or not self:Owned(support.item) or not E.Usable(self.player,support.item)) then self.support_hand=nil;support=nil end
     local pending=self.pending
     if pending and pending.role and pending.role~=role and not support then
         -- A cancelled travel equip cannot hold up returning to combat (or vice versa).
@@ -151,7 +161,9 @@ function Gear:Swap(role,snapshot)
         end
     end
     -- 蜂后一阶段专属手持所有权：native move/fight 只能协助当前阶段，不能另选一件。
-    local wanted=support and support.item or (role=="move" and self:Mobile(snapshot) or self:Weapon())
+    local patrol=self.patrol_hand
+    if patrol and (not self:Owned(patrol) or not E.Usable(self.player,patrol)) then self.patrol_hand=nil;patrol=nil end
+    local wanted=support and support.item or patrol or (role=="move" and self:Mobile(snapshot) or self:Weapon())
     if not wanted then return false end
     if hand==wanted then return true end
     if busy then return false end -- do not Stop or blacklist an item while hit-stunned
@@ -168,10 +180,10 @@ function Gear:Swap(role,snapshot)
         self.pending={item=wanted,role=role,untiltime=now+1.2,senttime=now};self.next_request=now+.25
         Debug.Equip(self.combat,"request",wanted,role)
         if role=="move" then self.mobile=wanted end
-    elseif reason~="角色忙碌" then Debug.Equip(self.combat,"rejected",wanted,role,{reason=reason or "unknown"});self.failed[wanted]=now+3 end
+    elseif reason~="角色忙碌" and reason~="请求限频" then Debug.Equip(self.combat,"rejected",wanted,role,{reason=reason or "unknown"});self.failed[wanted]=now+3 end
     return false
 end
-function Gear:Reset()self.action_hold=nil;self.support_hand=nil;self.weapon=nil;self.mobile=nil;self.pending=nil;self.failed={};self.next_request=0 end
+function Gear:Reset()self.patrol_hand=nil;self.action_hold=nil;self.support_hand=nil;self.weapon=nil;self.mobile=nil;self.pending=nil;self.failed={};self.next_request=0 end
 AIPLAYER.Equipment=E
 AIPLAYER.CombatEquipment=Gear
 

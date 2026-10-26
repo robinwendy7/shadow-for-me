@@ -1,6 +1,9 @@
 -- 路径每半码取样；当前已在威胁内时允许向外脱离，不允许越走越深。
 local N={}
 local function threatening(c,e)
+    if require("shadowself/control/arena_rabbit").Ignore(c,e) then return false end
+    local rhythm=c.plan and c.plan.arena_clockwork
+    if rhythm and rhythm:Live() and e~=rhythm.target then return false end
     -- A visible recovery/idle animation is not an active area attack. Keep the
     -- queen's guards as proximity obstacles for her dedicated separation tactic.
     if e.prefab=="beeguard" and c.beequeen and c.beequeen.queen then return true end
@@ -8,6 +11,8 @@ local function threatening(c,e)
     return not o or not o.neutral
 end
 function N.Radius(e)
+    -- 蘑菇地精的15码是吐孢子触发范围；本体只保留碰撞余量，孢子由机制层处理。
+    if e.prefab=="mushgnome" then return (e.GetPhysicsRadius and e:GetPhysicsRadius(0) or .5)+.7 end
     if e.prefab=="shadowthrall_hands" then return 2.8 end
     if e.prefab=="shadowthrall_horns" and e.AnimState:IsCurrentAnimation("jump") then return 3.8 end
     if e:HasTag("lunarthrall_plant_end") or e:HasTag("lunarthrall_plant_segment") then return 4.8 end
@@ -40,6 +45,7 @@ function N.Risk(c,q,exclude)
 end
 -- 只判断侧方怪/蜂蜜是否改变本次原生路线；不替原mod重判主目标与地形。
 function N.Obstructed(c,q,exclude)
+    if not require("shadowself/control/arena_center").Point(c,q) then return true end
     if N.Clearance(c,q)<5 then return true end
     local p=c.player:GetPosition();local zones={}
     for _,e in ipairs(c.enemies or {}) do
@@ -59,6 +65,7 @@ function N.Obstructed(c,q,exclude)
     return false
 end
 function N.Safe(c,q,exclude)
+    if not require("shadowself/control/arena_center").Point(c,q) then return false end
     if not c.actions:SafePoint(q) then return false end
     if N.Clearance(c,q)<5 and N.Clearance(c,q)<=N.Clearance(c,c.player:GetPosition()) then return false end
     local p=c.player:GetPosition();local initial=N.Risk(c,p,exclude)
@@ -89,7 +96,7 @@ function N.Escape(c,goal,exclude,accept)
         for i=0,23 do
             local angle=i*math.pi/12;local q=Vector3(p.x+math.cos(angle)*length,0,p.z+math.sin(angle)*length)
             local final=N.Risk(c,q,exclude)
-            if final<initial-.01 and (not accept or accept(q)) then
+            if final<initial-.01 and require("shadowself/control/arena_center").Point(c,q) and (not accept or accept(q)) then
                 local pass=true;local peak,exposure=initial,0
                 for j=1,8 do
                     local sample=Vector3(p.x+(q.x-p.x)*j/8,0,p.z+(q.z-p.z)*j/8)
@@ -106,6 +113,7 @@ function N.Escape(c,goal,exclude,accept)
     return best
 end
 function N.Select(c,q,exclude)
+    q=require("shadowself/control/arena_center").Goal(c,q)
     if N.Safe(c,q,exclude) then return q end
     if c.dodging and c.escape_until and GetTime()<c.escape_until and c.escape_point
         and N.Risk(c,c.player:GetPosition(),exclude)>0 and N.Safe(c,c.escape_point,exclude) then return c.escape_point end

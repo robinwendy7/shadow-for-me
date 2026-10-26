@@ -25,12 +25,14 @@ bishop.frame=21;assert(not routes:Dodge(bishop,false),"impact recovery releases 
 -- 蚁狮每轮只短移一次，同一时针；离Boss远也不能放大成大圆。
 local ant=ent("antlion");ant.anim="attack_pre";p.pos=Vector3(12,0,0)
 data=routes:Dodge(ant,false);q=data:fn();assert(q.z<0 and p.pos:DistSq(q)<=2^2,"fixed clockwise short world step")
-p.pos=q;assert(not routes:Dodge(ant,false));ant.anim="attack";ant.frame=0;assert(not routes:Dodge(ant,false),"same cast does not request another sidestep")
+p.pos=q
+for i=1,20 do local next=routes:Dodge(ant,false);if not next then break end;p.pos=next:fn() end
+assert(not routes:Dodge(ant,false));ant.anim="attack";ant.frame=0;assert(not routes:Dodge(ant,false),"same cast does not request another sidestep")
 ant.anim="attack_pre";ant.frame=0;data=routes:Dodge(ant,false);local q2=data:fn();assert(q2.z<q.z and p.pos:DistSq(q2)<=4)
--- 鱼雷位移只能算一次；到点后不能又平移一段。
+-- 蓄力先避开冲撞线，实际滑行开始后按鲨鱼的新位置跟随。
 local shark=ent("sharkboi");shark.anim="torpedo_pre";p.pos=Vector3(3,0,0)
 local Shark=require("shadowself/control/sharkroute");data=Shark.Dodge(c,shark,false);q=data:fn();p.pos=q
-shark.anim="torpedo_loop";shark.pos=Vector3(2,0,0);assert(Shark.Dodge(c,shark,false):fn():DistSq(q)==0)
+shark.anim="torpedo_loop";shark.pos=Vector3(2,0,0);assert(Shark.Dodge(c,shark,false):fn():DistSq(q)>.1,"sliding starts live following rather than holding the preparation escape point")
 shark.anim="idle";assert(not Shark.Dodge(c,shark,false) and not c.shark_torpedo)
 -- 攻击前无pending也必须读取侧方墨荒；躲避中不偷换捕获的主目标。
 local primary=ent("shadowthrall_wings",5,0);local hand=ent("shadowthrall_hands",-3,0);hand.anim="run_loop";p.pos=Vector3(0,0,0)

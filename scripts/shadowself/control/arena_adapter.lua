@@ -21,7 +21,28 @@ function Adapter:Snapshot()
  return {state=state,model=model,instance=id,generation=generation,kind=kind,wave=wave,route=route,
   intermission=model and model.status and model.status.text=="波次间休整" or false,
   arena=model and model.visible~=false and (model.title or ""):find("角斗场",1,true)~=nil,
+  remaining_objectives=self:RemainingObjectives(id,generation,wave),
   settlement=settlement and settlement.visible~=false and settlement.mode_id=="ARENA" and settlement or nil}
+end
+-- runtime.PublishState已向参与者同步arena_state；剩余目标数是服务端完成判定，不是附近扫描数量。
+function Adapter:RemainingObjectives(id,generation,wave)
+ local classified=self.player.astra_player_classified
+ local net=classified and classified.astra_state_payload
+ if not net or not id or not generation or not wave then return end
+ local payload=net:value()
+ if type(payload)=="string" then
+  local ok,value=pcall(json.decode,payload);if not ok then return end;payload=value
+ end
+ if type(payload)~="table" or payload.schema_version~=1 then return end
+ for _,record in ipairs(payload.states or {}) do
+  if record.schema_version==1 and record.state_id==id..":arena_state"
+   and record.instance_id==id and record.generation==generation then
+   local v=record.value
+   if type(v)~="table" or v.schema_version~=1 or v.mode_id~="ARENA" or v.wave~=wave then return end
+   local n=v.remaining_objectives
+   if type(n)=="number" and n>=0 and n<math.huge and n==math.floor(n) then return n end
+  end
+ end
 end
 function Adapter:SoloFields(state)
  local party=state.party

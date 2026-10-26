@@ -98,6 +98,9 @@ c.gear.action_hold={kind='queen_flute'};assert(not h:Tick(c),'flute/freeze suppo
 
 -- Nearby ground food is picked only across a safe short path, then eaten after ownership sync.
 h:Reset();hp=30;bag={};waffle.pos=Vector3(.5,0,0);c.plan.arena_ground=function() return {waffle} end;now=4
+c.plan.arena_ground=function() return {ball} end
+assert(not h:GroundFood(c) and picks==0,'early-wave emergency recovery cannot bypass the permanent meatballs pickup ban')
+c.plan.arena_ground=function() return {waffle} end
 assert(h:Tick(c) and h.pending.kind=='pickup' and picks==1)
 now=4.1;assert(h:Tick(c) and picks==1 and #bag==0,'pickup request is not ownership')
 bag={waffle};now=4.2;assert(h:Tick(c) and not h.pending)
@@ -164,6 +167,38 @@ assert(#equipment==2 and equipment[2]==sword,'after hurt normal combat restores 
 equipped=sword;p.anim=nil
 for i=1,3 do now=24.3+i*.03;local active=h:Tick(c);if not active then c.gear:Swap('attack',c.snapshot) end end
 assert(#equipment==2,'interrupted meal cannot start cane/weapon ping-pong')
+bag={waffle};hp=149;h:Reset()
+assert(not h:Choose({intermission=true}) and h:Choose({intermission=true,full_recovery=true})==waffle,'post7 full recovery can heal a small deficit instead of applying normal combat thresholds')
+hp=150;assert(not h:Choose({intermission=true,full_recovery=true}),'full recovery stops at actual maximum HP')
+-- 第九关舒缓茶按绝对SAN阈值饮用，即使满血也执行正常EAT并等待真实消耗。
+c.plan={arena=true,arena_wave=function() return 9 end};c.enemies={};c.hazards={};c.observed={};c.h={};c.gear={};c.travel={}
+p.anim=nil;attacks=false;busy=false;hp=150;now=40;h:Reset()
+local sanity=170;p.replica.sanity={GetCurrent=function() return sanity end}
+local tea=food('sweettea',62,{fooddrink=true});bag={tea};local teaEats=eats
+assert(not h:Choose(c) and not h:Tick(c),'exactly170 SAN and full health do not trigger tea')
+sanity=169.9;now=40.1;assert(h:Choose(c)==tea and h:Tick(c) and eats==teaEats+1,'below170 SAN drinks tea at full health without waiting for HP loss')
+now=40.2;h:Tick(c);assert(eats==teaEats+1 and h.pending,'no duplicate tea request while consumption is unacknowledged')
+bag={};now=40.3;h:Tick(c);assert(not h.pending,'actual tea inventory decrement acknowledges drinking')
+bag={tea};h:Reset();c.h.shadowself_dodging=true;now=41
+assert(not h:Tick(c) and eats==teaEats+1,'urgent native dodge preempts tea consumption')
+c.h.shadowself_dodging=nil;c.plan.arena_wave=function() return 15 end;h:Reset()
+assert(not h:Choose(c),'tea cooldown survives resets and wave changes after confirmed drinking')
+hp=120;assert(not h:Choose(c),'ordinary healing cannot bypass the60-second drinking cooldown');hp=150
+now=100.3
+assert(h:Choose(c)==tea,'reserved ninth-wave tea remains drinkable in later waves below170 SAN')
+sanity=170;assert(not h:Choose(c),'tea stops at the exact threshold in later waves too');sanity=169.9
+c.h.shadowself_dodging=nil;c.plan.arena_wave=function() return 8 end;h:Reset()
+assert(not h:Choose(c),'sanity tea policy starts at wave9')
+c.plan.arena_wave=function() return 9 end;p.replica.sanity=nil;assert(not h:Choose(c),'missing sanity reading cannot be assumed below170')
+-- 第八关六桨后的船上等待，满血且饥饿时也能使用携带食物补状态。
+c.plan.arena_wave=function() return 8 end;c.waiting_crab=true;c.full_recovery=true;hp=150
+local hunger=50;p.replica.hunger={GetCurrent=function() return hunger end,Max=function() return 150 end}
+waffle.components.edible={GetHunger=function() return 25 end};bag={waffle};h:Reset();now=42
+assert(h:Choose(c)==waffle and h:Tick(c),'boat waiting uses carried hunger food at full health')
+bag={};now=42.1;h:Tick(c);assert(not h.pending)
+bag={waffle};hunger=120;h:Reset();assert(not h:Choose(c),'boat hunger recovery stops at eighty percent')
+assert(not h:GroundFood(c),'boat waiting cannot chase a ground meal and replace the equipped ruins bat')
+print('PASS: wave9 tea uses actual SAN<170, full-health drinking, native EAT acknowledgement and dodge priority')
 package.loaded['shadowself/control/actions']=savedA;package.loaded['shadowself/control/arena_healing']=savedH;package.loaded['shadowself/control/arena_food']=savedF;package.loaded.cooking=savedCooking
 GetTime=oldTime;TheWorld=oldWorld;TheNet=oldNet;TheSim=oldSim
 print('PASS: official recipe recovery, spoilage/seasoning, meat/quick timings, deficit choice, safe low-health retreat, side-charge and ground danger priority, swing drain, authoritative pickup/eat confirmation, retry and intermission healing')
