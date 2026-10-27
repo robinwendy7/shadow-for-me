@@ -125,10 +125,7 @@ function ActionLibrary:Stop()
     local pc = self.player.components.playercontroller
     self.generation=self.generation+1
     if pc and not pc.ismastersim and self.has_request then
-        -- 已发出的点击可能仍在服务器排队；点脚下替换旧行走目标，并释放连续控制。
-        local point=self.player:GetPosition()
-        local platform,x,z=pc:GetPlatformRelativePosition(point.x,point.z)
-        SendRPCToServer(RPC.LeftClick,ACTIONS.WALKTO.code,x,z,nil,true,0,false,nil,platform,platform~=nil)
+        -- 一次统一释放按键，一次停止走路；不再追加脚下点击。
         SendRPCToServer(RPC.StopAllControls)
         SendRPCToServer(RPC.StopWalking)
         pc.remote_controls = {}

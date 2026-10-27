@@ -5,12 +5,16 @@ function F.Zone(e,player)
  if not e:IsValid() then return end
  local name=e.prefab
  if require("shadowself/control/arena_snails").Burning(e) then
-  return {pos=e:GetPosition(),radius=3+(player.GetPhysicsRadius and player:GetPhysicsRadius(0) or .5)+1,source=e,explosive_snail=true}
+  local arena=player._shadowself_arena_move_owner
+  if arena and arena.running and arena.wave==5 and e._shadowself_snail_fire
+   and not require("shadowself/control/arena_snails").Explosive(e) then return end
+  return {pos=e:GetPosition(),radius=3+(player.GetPhysicsRadius and player:GetPhysicsRadius(0) or .5)+1,source=e,fire=true,burning_snail=true,explosive_snail=require("shadowself/control/arena_snails").Explosive(e)}
  end
  if name~="houndfire" and name~="fire" then return end
  local owner=e.entity and e.entity.GetParent and e.entity:GetParent()
  if owner and (owner==player or safe[owner.prefab] or owner:HasTag("player")
   or owner.replica and owner.replica.inventoryitem and owner.replica.inventoryitem:IsHeld()) then return end
+ if owner and require("shadowself/control/arena_snails").Burning(owner) then return F.Zone(owner,player) end
  local propagator=(owner and owner.components and owner.components.propagator) or (e.components and e.components.propagator)
  if propagator and propagator.damages==false then return end
  local radius=(propagator and propagator.damagerange or 3)+(player.GetPhysicsRadius and player:GetPhysicsRadius(0) or .5)+.35
@@ -31,6 +35,14 @@ function F.WebZones(player,entities)
  end
  return zones
 end
+-- 这是热源缓冲区，不把池边升温误报为一次怪物伤害。
+function F.LavaZones(entities)
+ local zones={}
+ for _,e in ipairs(entities) do
+  if e.prefab=="lava_pond" and e:IsValid() then zones[#zones+1]={pos=e:GetPosition(),radius=10,source=e,heat=true} end
+ end
+ return zones
+end
 function F.Safe(player,point,zones)
  local p=player:GetPosition();local steps=math.max(2,math.ceil(math.sqrt(p:DistSq(point))/.5))
  for _,z in ipairs(zones or {}) do
@@ -43,12 +55,12 @@ function F.Safe(player,point,zones)
  end
  return true
 end
-function F.Escape(player,zones)
+function F.Escape(player,zones,distances)
  local p=player:GetPosition();local inside=false
  for _,z in ipairs(zones) do if p:DistSq(z.pos)<z.radius^2 then inside=true;break end end
  if not inside then return end
  local map=TheWorld.Map;local best,score
- for _,distance in ipairs({3,5,7}) do for i=0,23 do
+ for _,distance in ipairs(distances or {3,5,7}) do for i=0,23 do
   local a=i*math.pi/12;local q=Vector3(p.x+math.cos(a)*distance,0,p.z+math.sin(a)*distance)
   if F.Safe(player,q,zones) then
    local clear=true

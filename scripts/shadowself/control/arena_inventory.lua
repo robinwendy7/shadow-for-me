@@ -3,6 +3,7 @@ local Policy=require("shadowself/control/arena_policy")
 local Damage=require("shadowself/control/weapon_damage")
 local Food=require("shadowself/control/arena_food")
 local P={}
+function P.AfterSix(item) return item.prefab=="armorgrass" or item.prefab=="torch" or item.prefab=="strawhat" or item.prefab=="cookiecutterhat" end
 local tools={staff_tornado=true,cane=true,nightstick=true,panflute=true,firestaff=true,icestaff=true,icestaff2=true,icestaff3=true,
  orangestaff=true,armorsnurtleshell=true,armorskeleton=true,nightmarefuel=true,yellowamulet=true,
  rainhat=true,eyebrellahat=true,lunarplant_kit=true,voidcloth_kit=true}
@@ -31,7 +32,18 @@ function P.Dominates(a,b)
  -- 位面武器不能因物理伤害较低被普通武器淘汰。
  return ap>=bp and ad>=bd and (ap>bp or ad>bd or P.Condition(a)>P.Condition(b)+.05)
 end
+function P.AfterTen(item)
+ local eq=item.replica and item.replica.equippable
+ if not eq then return false end
+ local slot=eq:EquipSlot()
+ return slot==EQUIPSLOTS.HEAD or slot==EQUIPSLOTS.BODY and item.prefab~="armorskeleton"
+  and (item:HasTag("armor") or P.Armor(item)~=nil)
+end
 function P.Special(name,wave)
+ if wave>=11 and (name=="alterguardianhat" or name=="lunar_seed" or name=="staff_lunarplant") then return true end
+ if wave==11 and name=="wathgrithr_improvedhat" then return true end
+ if name=="sweettea" and wave>=9 then return true end
+ if name=="nightstick" then return wave<9 end
  if name=="staff_tornado" then return true end
  if name=="rainhat" then return wave<=6 end
  if tools[name] then return true end
@@ -58,7 +70,29 @@ function P.PlanarArmor(item)
  if c and c.GetDefense then return c:GetDefense() end
  return ({armor_lunarplant=10,armor_voidcloth=10,lunarplanthat=10,voidclothhat=10,armorwagpunk=15})[item.prefab] or 0
 end
+-- 无可用身甲的前八关，头部按实际吸收率优先；同减伤才比较位面防御与耐久。
+function P.HelmetFallback(player,bag,wave)
+ if not wave or wave<1 or wave>8 then return end
+ local inv=player.replica.inventory
+ if inv:GetEquippedItem(EQUIPSLOTS.BODY) then return end
+ for _,item in ipairs(bag) do
+  local eq=item.replica and item.replica.equippable
+  if eq and eq:EquipSlot()==EQUIPSLOTS.BODY and not item:HasTag("broken") and P.Condition(item)>0 and P.Protection(item)>0 then return end
+ end
+ local best
+ for _,item in ipairs(bag) do
+  local eq=item.replica and item.replica.equippable
+  if eq and eq:EquipSlot()==EQUIPSLOTS.HEAD and not item:HasTag("broken") and P.Condition(item)>0 and P.Protection(item)>0 then
+   if not best or P.Protection(item)>P.Protection(best)
+    or P.Protection(item)==P.Protection(best) and (P.PlanarArmor(item)>P.PlanarArmor(best)
+     or P.PlanarArmor(item)==P.PlanarArmor(best) and P.Condition(item)>P.Condition(best)+.05) then best=item end
+  end
+ end
+ return best
+end
 function P.Obsolete(item,bag,player,wave)
+ if require("shadowself/control/arena_doc_inventory").Protected(player,item) then return false end
+ if wave>=9 and (item.prefab=="nightstick" or item.prefab=="armormarble") then return true end
  if P.BelowArmorFloor(item,wave) then return true end
  if item.prefab=="rainhat" and wave>6 or item.prefab=="torch" and wave>=8 then return true end
  if item.prefab=="hambat" then
@@ -120,15 +154,51 @@ function P.ForecastDiscard(bag,player,wave,route)
  end
 end
 function P.Want(item,bag,player,wave)
+ local owner=require("shadowself/control/arena_doc_inventory").Owner(player)
+ if owner and require("shadowself/control/arena_doc_inventory").Drop(owner,item,bag) then return false end
+ local doc=require("shadowself/control/arena_doc_inventory")
+ local food_wanted=doc.FoodWant(item,bag,player);if food_wanted~=nil then return food_wanted end
+ if doc.Protected(player,item) then return doc.PickupProtected(player,item,bag) end
+ if not Policy.PickupAllowed(item,wave,player) then return false end
+ if wave>=7 and P.AfterSix(item) then return false end
+ if wave>=9 and item.prefab=="sweettea" then
+  if Food.Health(item,player)<=0 then return false end
+  for _,other in ipairs(bag) do if other.prefab=="sweettea" and Food.Health(other,player)>0 then return false end end
+  return true
+ end
+ if wave==5 and item.prefab=="panflute" then
+  local tools=require("shadowself/control/arena_tools");if not tools.Usable(item) then return false end
+  local usable=0;for _,other in ipairs(bag) do if other.prefab=="panflute" and tools.Usable(other) then usable=usable+1 end end
+  return usable<2 -- 本轮补一支备用排箫，避免重复拾取挤满物品栏。
+ end
+ if item.prefab=="panflute" or item.prefab=="staff_tornado" then
+  local tools=require("shadowself/control/arena_tools")
+  if not tools.Usable(item) then return false end
+  -- 用尽的工具仍在背包中时，也要允许拿取地上的可用替代品。
+  local usable=false
+  for _,other in ipairs(bag) do if other.prefab==item.prefab and tools.Usable(other) then usable=true;break end end
+  if not usable then return true end
+ end
  if P.Obsolete(item,bag,player,wave) then return false end
- if P.IsFood(item) then
+ if wave>=11 and P.IsMeal(item) then
+  local candidates={};for _,other in ipairs(bag) do
+   if other.prefab==item.prefab then
+    local stack=other.replica and other.replica.stackable
+    if stack and not stack:IsFull() then return true end
+   end
+   candidates[#candidates+1]=other
+  end
+  candidates[#candidates+1]=item
+  return P.RetainedMeals(candidates,player)[item] or false
+ end
+ if P.IsMeal(item) then
   local count=0
-  for _,other in ipairs(bag) do if P.IsFood(other) then
+  for _,other in ipairs(bag) do if P.IsMeal(other) then
    count=count+1
    local stack=other.replica and other.replica.stackable
    if other.prefab==item.prefab and stack and not stack:IsFull() then return true end
   end end
-  if count>=2 then return false end
+  if count>=(wave>=7 and 1 or 2) then return false end
  end
  local count=0
  for _,other in ipairs(bag) do if other.prefab==item.prefab then
@@ -141,11 +211,16 @@ function P.Want(item,bag,player,wave)
 end
 function P.Priority(item,wave)
  local n=item.prefab
+ if n=="armorskeleton" and wave>=10 then return 9990 end
  if wave==8 and (n=="boat_item" or n=="boat_grass_item") then return 10000 end
  if wave==8 and (n=="oar_driftwood" or item:HasTag("oar")) then return 9900 end
  if Policy.TrapLoot(item,wave) then return -1000 end
  local armor=P.Armor(item)
- if n=="cane" then return 3000 end
+ if n=="cane" then return wave==3 and 9800 or 3000 end
+ if wave==9 and n=="sweettea" then return 8500 end
+ if wave>=11 and n=="voltgoatjelly_spice_chili" then return 9950 end
+ if wave==11 and n=="wathgrithr_improvedhat" then return 9900 end
+ if wave>=11 and n~="sweettea" and Food.Sanity(item)>0 then return 700+Food.Sanity(item) end
  if armor then return 2200+armor end
  if n=="nightstick" then return 4000+P.Physical(item) end
  if not tools[n] and not situational[n] and item.HasTag and item:HasTag("weapon") then return 4000+P.Physical(item) end
@@ -163,33 +238,91 @@ end
 local function foodscore(item,player)
  return math.max(0,Food.Health(item,player))+(item.prefab:find("voltgoatjelly",1,true) and 100 or 0)
 end
--- 第七关休整开始主动腾位；只清理已知过时物品，不提前扔掉唯一护甲。
+-- 舒缓茶按原有低SAN饮用规则单独保留；料理限制按物品栏格子而非堆叠数量。
+function P.IsMeal(item) return item.prefab~="sweettea" and P.IsFood(item) end
+function P.RetainedMeals(bag,player)
+ if require("shadowself/control/arena_doc_inventory").Enabled(player) then return require("shadowself/control/arena_doc_inventory").FoodKeep(bag,player) end
+ local jelly,reserve,sanity,health
+ for _,item in ipairs(bag) do if P.IsMeal(item) and (Food.Health(item,player)>0 or Food.Sanity(item,player)>0) then
+  if item.prefab=="voltgoatjelly_spice_chili" then
+   if not jelly or Food.Freshness(item)>Food.Freshness(jelly) then jelly=item end
+  else
+   local san,hp=Food.Sanity(item,player),Food.Health(item,player)
+   if not reserve or san>sanity or san==sanity and hp>health then reserve,sanity,health=item,san,hp end
+  end
+ end end
+ local keep={};if jelly then keep[jelly]=true end;if reserve then keep[reserve]=true end;return keep
+end
+function P.ExcessMeal(bag,player,wave,cleared)
+ local doc=require("shadowself/control/arena_doc_inventory")
+ if doc.Enabled(player) then
+  local keep=doc.FoodKeep(bag,player)
+  for _,item in ipairs(bag) do if doc.IsFood(item) and not keep[item] then return item end end
+  return
+ end
+ if wave>=11 then
+  local keep=P.RetainedMeals(bag,player)
+  for _,item in ipairs(bag) do if P.IsMeal(item) and not keep[item] then return item end end
+  return
+ end
+ local limit=(wave>=7 or wave==6 and cleared) and 1 or 2
+ local meals={}
+ for _,item in ipairs(bag) do if P.IsMeal(item) then meals[#meals+1]=item end end
+ if #meals<=limit then return end
+ table.sort(meals,function(a,b)
+  local av,bv=foodscore(a,player),foodscore(b,player)
+  if av~=bv then return av>bv end
+  return (a.GUID or 0)<(b.GUID or 0)
+ end)
+ return meals[#meals]
+end
+-- 第六关结束先清理指定四类旧物；其他护甲仍按后段防御门槛处理。
 function P.BelowArmorFloor(item,wave)
+ if wave==12 and P.PlanarArmor(item)>0 then return false end
+ if wave==11 and item.prefab=="wathgrithr_improvedhat" then return false end
  if not P.Armor(item) then return false end
  local floor=wave>=11 and .9 or wave>=8 and .8 or 0
  return P.Protection(item)+.0001<floor
 end
 function P.Cleanup(bag,player,wave,cleared)
+ local doc=require("shadowself/control/arena_doc_inventory")
+ local owner=doc.Owner(player)
+ if owner then
+  local filtered={}
+  for _,item in ipairs(bag) do
+   if doc.Drop(owner,item,bag) then return item end
+   if not doc.Protected(player,item) then filtered[#filtered+1]=item end
+  end
+  bag=filtered
+ end
+ if wave==10 and cleared then for _,item in ipairs(bag) do if P.AfterTen(item) then return item end end end
+ if wave>=10 then for _,item in ipairs(bag) do if item.prefab=="staff_tornado" and P.Condition(item)<.3 then return item end end end
+ if wave>=10 or wave==9 and cleared then for _,item in ipairs(bag) do if item.prefab=="armorwood" or item.prefab=="armormarble" then return item end end end
+ if wave>=9 then for _,item in ipairs(bag) do if item.prefab=="nightstick" or item.prefab=="armormarble" then return item end end end
+ if wave>=7 or wave==6 and cleared then
+  for _,item in ipairs(bag) do if P.AfterSix(item) then return item end end
+ end
+ local excess=P.ExcessMeal(bag,player,wave,cleared)
+ if excess then return excess end
  if not (wave>=8 or wave==7 and cleared) then return nil end
  local nextphase=(wave==7 or wave==10) and cleared and wave+1 or wave
- local foods={}
  for _,item in ipairs(bag) do
   local eq=item.replica and item.replica.equippable
   local worn=P.Armor(item) and eq and player.replica.inventory:GetEquippedItem(eq:EquipSlot())==item
   if P.BelowArmorFloor(item,nextphase) or not worn and P.Obsolete(item,bag,player,nextphase) then return item end
-  if P.IsFood(item) then foods[#foods+1]=item end
  end
- if #foods>2 then
-  table.sort(foods,function(a,b)
-   local av,bv=foodscore(a,player),foodscore(b,player)
-   if av~=bv then return av>bv end
-   return (a.GUID or 0)<(b.GUID or 0)
-  end)
-  return foods[#foods]
- end
+
 end
 -- 背包满时只用更有价值且已存在于地面的物品置换，不清除未知玩家物品。
 function P.Discard(bag,player,wave,wanted)
+ if wave>=11 and wanted and P.IsMeal(wanted) then
+  local combined={wanted};for _,item in ipairs(bag) do combined[#combined+1]=item end
+  local extra=P.ExcessMeal(combined,player,wave,false)
+  if extra and extra~=wanted then return extra end
+ end
+ if wanted and wanted.prefab=="panflute" then
+  for _,item in ipairs(bag) do if item.prefab=="panflute" and not require("shadowself/control/arena_tools").Usable(item) then return item end end
+ end
  local cleanup=P.Cleanup(bag,player,wave,false);if cleanup then return cleanup end
  for _,item in ipairs(bag) do if not P.Armor(item) and P.Obsolete(item,bag,player,wave) then return item end end
  if wanted and P.Weapon(wanted,player) then
@@ -208,7 +341,8 @@ function P.Discard(bag,player,wave,wanted)
  end
  if wanted and P.Priority(wanted,wave)>=500 then
   local worst,score,count=nil,nil,0
-  for _,item in ipairs(bag) do local value=(food[item.prefab] or Food.Known(item.prefab)) and math.max(0,Food.Health(item,player))
+  local keep=wave>=11 and P.RetainedMeals(bag,player) or {}
+  for _,item in ipairs(bag) do local value=not keep[item] and not (wave>=9 and item.prefab=="sweettea") and (food[item.prefab] or Food.Known(item.prefab)) and math.max(0,Food.Health(item,player))
    if value then count=count+1;if not score or value<score then worst,score=item,value end end
   end
   if count>1 then return worst end

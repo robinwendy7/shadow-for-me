@@ -115,12 +115,57 @@ function M.UseOn(player,item,target,wanted)
     end
     return false
 end
-function M.Self(player,item,wanted)
+-- 原版背包补燃料动作；预演发出前重新检查维护线程的所有权。
+function M.RefuelArmor(player,fuel,armor,guard)
+ local pc=player.components.playercontroller
+ local function valid() return fuel:IsValid() and armor:IsValid() and (not guard or guard()) end
+ if pc:IsBusy() or not valid() then return false end
+ for _,right in ipairs({true,false}) do
+  for _,act in ipairs(player.components.playeractionpicker:GetUseItemActions(armor,fuel,right) or {}) do
+   if act.action==ACTIONS.ADDFUEL or act.action==ACTIONS.ADDWETFUEL then
+    if pc.ismastersim then pc:DoAction(act)
+    else
+     local function send()
+      if valid() then SendRPCToServer(RPC.ControllerUseItemOnItemFromInvTile,act.action.code,armor,fuel,act.action.mod_name) end
+     end
+     if pc.locomotor then
+      if not pc:CanLocomote() then return false end
+      act.preview_cb=send;pc.locomotor:PreviewAction(act,true)
+     else
+      if act.action.pre_action_cb then act.action.pre_action_cb(act) end
+      send()
+     end
+    end
+    return true
+   end
+  end
+ end
+ return false
+end
+function M.Self(player,item,wanted,guard)
+    if guard and not guard() then return false end
     local pc=player.components.playercontroller
     for _,right in ipairs({true,false}) do
         for _,act in ipairs(player.components.playeractionpicker:GetInventoryActions(item,right) or {}) do
             if act.action==wanted then
-                if pc.ismastersim then pc:DoAction(act)
+                if pc.ismastersim then act._shadowself_native=true;pc:DoAction(act)
+                elseif guard then
+                    local sent=false
+                    local function send()
+                        if sent or not item:IsValid() or not guard() then return false end
+                        sent=true;SendRPCToServer(RPC.ControllerUseItemOnSelfFromInvTile,wanted.code,item,wanted.mod_name);return true
+                    end
+                    act._shadowself_native=true
+                    if pc.locomotor then
+                        if not pc:CanLocomote() or pc:IsBusy() then return false end
+                        act.preview_cb=send;pc.locomotor:PreviewAction(act,true)
+                    else
+                        if wanted.pre_action_cb then
+                            if pc:IsBusy() then return false end
+                            wanted.pre_action_cb(act)
+                        end
+                        return send()
+                    end
                 else pc:RemoteControllerUseItemOnSelfFromInvTile(act,item) end
                 return true
             end
@@ -176,6 +221,8 @@ function M.TransferBatch(player,target,steps,guard)
 end
 
 function M.Move(player,point)
+    local arena=player._shadowself_arena_move_owner
+    if arena and arena.running and arena.instance then require("shadowself/control/arena_late_travel").Tick(player,arena.wave) end
     local pc=player.components.playercontroller
     if pc.locomotor then pc.locomotor:GoToPoint(point,nil,true)
     else
@@ -190,14 +237,9 @@ function M.Stop(player)
     if player.ClearBufferedAction then player:ClearBufferedAction() end
     if pc.locomotor then pc.locomotor:Stop();pc.locomotor:Clear() end
     if not pc.ismastersim then
-        SendRPCToServer(RPC.StopControl,CONTROL_PRIMARY)
-        SendRPCToServer(RPC.StopControl,CONTROL_SECONDARY)
+        SendRPCToServer(RPC.StopAllControls)
         SendRPCToServer(RPC.StopWalking)
-        -- 无预测时 StopWalking 只清 remote_vector，不会取消点击后排队的寻路。
-        -- 与手动点击脚下一样，覆盖服务器上尚未完成的移动/工作目标。
-        local pos=player:GetPosition()
-        local platform,x,z=pc:GetPlatformRelativePosition(pos.x,pos.z)
-        SendRPCToServer(RPC.LeftClick,ACTIONS.WALKTO.code,x,z,nil,true,nil,nil,nil,platform,platform~=nil)
+        pc.remote_controls={}
     end
 end
 function M.Items(player)

@@ -17,19 +17,27 @@ function M.Choose(s,goal,primary,accept)
  for _,e in ipairs(s.enemies) do
   if e:IsValid() and not Status.Sleeping(e) and not Status.Frozen(e) then
    local data=s.data and s.data[e]
-   threats[#threats+1]={e=e,pos=e:GetPosition(),data=data,lane=Incoming.Lane(c,e),
+   local motion=s.motion and s.motion[e]
+   threats[#threats+1]={e=e,pos=e:GetPosition(),data=data,lane=Incoming.Lane(c,e),motion=motion,
     radius=e==primary and primaryRadius or Nav.Radius(e)+.3,
     body=(e.GetPhysicsRadius and e:GetPhysicsRadius(0) or .5)+playerRadius+.2}
   end
  end
- local function risk(q)
+ local speed=math.max(3.5,c.Speed and c:Speed() or 6)
+ local latency=c.Latency and c:Latency() or .1
+ local function future(t,seconds)
+  if not t.motion or t.lane then return t.pos end
+  return Vector3(t.pos.x+t.motion.vx*seconds,0,t.pos.z+t.motion.vz*seconds)
+ end
+ local function risk(q,seconds)
   local value=0
   for _,t in ipairs(threats) do
+   local pos=future(t,seconds or 0)
    -- 肉身碰撞始终避免；待机怪攻击圈是软代价，不再把整片空地全封死。
-   value=value+penetration(q,t.pos,t.body)^2*50
+   value=value+math.max(penetration(q,t.pos,t.body),penetration(q,pos,t.body))^2*50
    if t.lane then value=value+Incoming.Risk(t.lane,q)^2*12
    elseif t.data and t.data.safe then value=value+(t.data.safe(q) and 0 or 12)
-   else value=value+penetration(q,t.pos,t.radius)^2*(t.data and 8 or 1) end
+   else value=value+math.max(penetration(q,t.pos,t.radius),penetration(q,pos,t.radius))^2*(t.data and 8 or 1) end
   end
   for _,h in ipairs(s.hazards or {}) do value=value+penetration(q,h.pos,h.radius)^2*20 end
   return value
@@ -53,7 +61,8 @@ function M.Choose(s,goal,primary,accept)
  end
  local function evaluate(q)
   if not allowed(q) or not s.actions:SafePoint(q) then return end
-  local final=risk(q);local peak,exposure=initial,0;local monotonic=true
+  local duration=math.sqrt(p:DistSq(q))/speed
+  local final=risk(q,math.min(.45,duration+latency));local peak,exposure=initial,0;local monotonic=true
   local n=math.max(3,math.ceil(math.sqrt(p:DistSq(q))/.4))
   for i=1,n do
    local v=Vector3(p.x+(q.x-p.x)*i/n,0,p.z+(q.z-p.z)*i/n)
@@ -61,9 +70,11 @@ function M.Choose(s,goal,primary,accept)
    local map=TheWorld and TheWorld.Map
    if map and map.IsPassableAtPoint and not (s.player.GetCurrentPlatform and s.player:GetCurrentPlatform())
     and (not map:IsPassableAtPoint(v.x,0,v.z) or map.IsOceanAtPoint and map:IsOceanAtPoint(v.x,0,v.z)) then return end
-   local r=risk(v);peak=math.max(peak,r);exposure=exposure+r/n
+   local ahead=math.min(.45,duration*i/n+latency)
+   local r=risk(v,ahead);peak=math.max(peak,r);exposure=exposure+r/n
    for _,t in ipairs(threats) do
     if penetration(v,t.pos,t.body)>penetration(p,t.pos,t.body)+.02 then return end
+    if t.motion and penetration(v,future(t,ahead),t.body)>penetration(p,t.pos,t.body)+.02 then return end
     if t.lane and Incoming.Risk(t.lane,v)>Incoming.Risk(t.lane,p)+.02 then return end
     if penetration(v,t.pos,t.radius)>penetration(p,t.pos,t.radius)+.02 then monotonic=false end
    end

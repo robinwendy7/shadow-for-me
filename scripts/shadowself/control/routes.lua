@@ -32,25 +32,46 @@ function Routes:AntContext()
  end
  return setmetatable({hazards=hazards},{__index=c})
 end
--- 固定时针短移，只有沙刺确实挡路才改向。
+-- 优先恒定半径的圆周路线，小步执行；每次重新检查前方完整路线。
 function Routes:AntPoint(e)
  local c=self:AntContext();local p=c.player:GetPosition();local ep=e:GetPosition()
  self.ant_exit=nil;self.ant_plan=nil;self.ant_clearing=nil
- local radius=math.max(2.2,distance(p,ep));local theta=math.atan2(p.z-ep.z,p.x-ep.x)
  local planner=require("shadowself/control/antnavigation");local preferred=self.sides[e] or -1
- -- 先尝试同一个时针方向的小步，长度不随离Boss的半径放大。
- for _,side in ipairs({preferred,-preferred}) do
-  for _,length in ipairs({1.75,2,2.25}) do
-   local a=theta+side*math.atan(length/radius)
-   local r=radius/math.cos(a-theta)
-   local point=Vector3(ep.x+math.cos(a)*r,0,ep.z+math.sin(a)*r)
-   if Nav.Risk(c,point,e)==0 and planner.Corridor(c,p,point,e) then self.sides[e]=side;return point end
+ self.ant_path=planner.Plan(c,e,preferred)
+ if self.ant_path then self.ant_path.target=e;self.sides[e]=self.ant_path.side end
+ return self.ant_path and self.ant_path.goal or p
+end
+function Routes:AntReached(point)
+ local c=self.c;local speed=c.Speed and c:Speed() or 6
+ local ping=(TheNet and TheNet.GetPing and TheNet:GetPing() or 0)/1000
+ local tolerance=math.max(.18,math.min(.65,speed*(.1+ping)+.05))
+ return c.player:GetPosition():DistSq(point)<=tolerance^2
+end
+function Routes:AntStep(e,continue)
+ local c=self:AntContext();local p=c.player:GetPosition();local planner=require("shadowself/control/antnavigation")
+ local route=self.ant_path
+ if route then
+  while route.index<=#route.points and self:AntReached(route.points[route.index]) do
+   local next_point=route.points[route.index+1]
+   if next_point and not planner.Corridor(c,p,next_point,e) then break end
+   route.index=route.index+1
   end
  end
- return p
+ if not route or route.target~=e or not planner.Valid(c,e,route)
+  or route.index>#route.points and (continue or Nav.Risk(c,p,e)>0) then self:AntPoint(e);route=self.ant_path end
+ return route and (route.points[route.index] or route.goal) or nil
 end
-function Routes:AntRecover()
+function Routes:AntRecover(e)
  self.ant_exit=nil;self.ant_plan=nil;self.ant_clearing=nil
+ if not e or e.prefab~="antlion" or anim(e,"attack_pre") or anim(e,"cast_pre") or anim(e,"attack") then return end
+ local c=self:AntContext();local planner=require("shadowself/control/antnavigation")
+ if planner.Approach(c,c.player:GetPosition(),e) then self.ant_recovering=nil;return end
+ if not self.ant_recovering then self:AntPoint(e) end
+ self.ant_recovering=true
+ local q=planner.Route(c,e) -- return through an attack corridor, not an endless ring
+ q=q or self:AntStep(e,true)
+ if not q then self.c.bridge:PauseAttack();return "support",e end
+ return self.boss:Move(q,"蚁狮 · 沿环线绕过沙刺后恢复攻击",e)
 end
 function Routes:RememberAnt()
  local p=self.c.player:GetPosition();self.anttrail=self.anttrail or {}
@@ -143,8 +164,19 @@ function Routes:Bishop(e,base)
  local state=self.bishops[e]
  if not state or name=="atk2_pre" and frame(e)<(state.frame or 0) then state={};self.bishops[e]=state end
  state.frame=frame(e);self.bishop=state
- if name=="atk2_pst" and frame(e)>20 then return false end
+ local rhythm=self.c.plan and self.c.plan.arena_clockwork
+ local state_driven=rhythm and rhythm.target==e and rhythm:Live()
+ if not state_driven and name=="atk2_pst" and frame(e)>20 then return false end
  local c=self.c;local p=c.player:GetPosition();local ep=e:GetPosition();local mark=state.mark or p
+ if state_driven then
+  -- 主教优先不处理其他发条的攻击，但其肉身仍会堵住侧移路线。
+  local hazards={};for _,h in ipairs(c.hazards or {}) do hazards[#hazards+1]=h end
+  local roster=c.plan.arena_remaining and c.plan.arena_remaining() or c.enemies or {}
+  for _,other in ipairs(roster) do if other~=e and other:IsValid() and not other:HasTag("dead") and not other:HasTag("isdead") then
+   hazards[#hazards+1]={pos=other:GetPosition(),radius=(other.GetPhysicsRadius and other:GetPhysicsRadius(0) or .5)+c.player:GetPhysicsRadius(0)+.4}
+  end end
+  c=setmetatable({hazards=hazards},{__index=c})
+ end
  local score
  -- dist和朝向可重建发射主教位置，防止三发条/多主教时绑到别人的标记。
  for _,fx in ipairs(self.boss.entities or {}) do if fx.prefab=="bishop_targeting_fx" and fx:IsValid() and not anim(fx,"reticule_pst") then
@@ -168,15 +200,19 @@ function Routes:Bishop(e,base)
  local data={atkanim=name,point="player",dist=safe,update=true,exclusive=true,noattack=true,safe=clear}
  data.fn=function()
   local pos=c.player:GetPosition();local center=e:GetPosition()
+  radius=math.max(2.2,distance(pos,center))
   if not tracking and clear(pos) then return pos end
   local theta=math.atan2(pos.z-center.z,pos.x-center.x)
   local preferred=state.side or 1
   for _,side in ipairs({preferred,-preferred}) do
    if tracking then
     -- 标记仍在追踪时持续同方向侧绕，不能到旧安全点就停，等标记追上。
-    local step=math.min(.65,1.5/radius);local a=theta+side*step
-    local point=Vector3(center.x+math.cos(a)*radius,0,center.z+math.sin(a)*radius)
-    if clear(point) and Nav.Safe(c,point,e) then state.side=side;return point end
+    local step=math.min(.65,1.5/radius)
+    for _,r in ipairs({radius,radius+1,radius+2}) do
+     local a=theta+side*step
+     local point=Vector3(center.x+math.cos(a)*r,0,center.z+math.sin(a)*r)
+     if clear(point) and Nav.Safe(c,point,e) then state.side=side;return point end
+    end
    else
     for step=.35,2.8,.15 do
      local a=theta+side*step;local point=Vector3(center.x+math.cos(a)*radius,0,center.z+math.sin(a)*radius)
@@ -242,13 +278,23 @@ function Routes:Dodge(e,base)
     if not state or state.target~=e or (name=="attack_pre" or name=="cast_pre") and (state.name~=name or f<state.frame) then
      state={target=e,name=name,point=self:AntPoint(e),origin=self.c.player:GetPosition(),frame=f};self.antlion=state
     end
+    local previous_frame=state.frame
+    if name=="cast_pre" and (not state.lock_origin or f<=3 and f>previous_frame) then
+     local p=self.c.player:GetPosition();state.lock_origin=Vector3(p.x,0,p.z)
+    end
     state.frame=f;state.name=name
-    if not state.done and not Nav.Safe(self:AntContext(),state.point,e) then state.point=self:AntPoint(e) end
-    if self.c.player:GetPosition():DistSq(state.point)<.12^2 and state.origin and state.origin:DistSq(state.point)>.25 then
+    local origin=state.lock_origin or state.origin
+    if not state.done then
+     local extend=name=="cast_pre" and (f<33+require("shadowself/control/nettiming").Frames(self.c)+2 or origin and self.c.player:GetPosition():DistSq(origin)<=1.9^2)
+     self:AntStep(e,extend)
+     state.point=self.ant_path and self.ant_path.goal or self.c.player:GetPosition()
+    end
+    if (name=="cast_pre" and f>=33+require("shadowself/control/nettiming").Frames(self.c)+2 or name~="cast_pre" and self:AntReached(state.point)) and origin and self.c.player:GetPosition():DistSq(origin)>1.9^2
+     and Nav.Risk(self:AntContext(),self.c.player:GetPosition(),e)==0 then
      state.done=true
     end
     if state.done then return false end
-    return {atkanim=name,point="player",dist=1.5,update=false,exclusive=true,noattack=true,fn=function() return state.point end}
+    return {atkanim=name,point="player",dist=1.8,update=true,exclusive=true,noattack=true,fn=function() return self:AntStep(e) end}
    end
   end
   self.antlion=nil

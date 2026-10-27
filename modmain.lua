@@ -5,6 +5,7 @@ local QueenDebug=require("shadowself/control/queendebug")
 G.print("[ShadowSelf] "..QueenDebug.VERSION.." loaded: embedded combat")
 require("shadowself/native").Init(MODROOT)
 local options = {
+    bone_refuel = GetModConfigData("bone_refuel") or 25,
     speech_color = GetModConfigData("speech_color") or "red",
     speech_voice = GetModConfigData("speech_voice") ~= false,
     leash = GetModConfigData("leash") or 15,
@@ -32,7 +33,6 @@ Assets = {
 }
 local function BindShadow(controls,owner)
     owner = owner or controls.owner
-    require("shadowself/control/adventureworld/registry").Install(G)
     if owner == nil or owner ~= G.ThePlayer or owner._shadowself ~= nil then return end
     require("shadowself/bombs").Bind(owner)
     local handoff=require("shadowself/handoff")

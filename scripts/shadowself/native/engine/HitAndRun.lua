@@ -174,7 +174,7 @@ do --走向和攻击函数
     end
     function HitAndRun:StopPredictWalk()
         if self.shadowself_predicting then
-            if RPC.PredictWalking then SendRPCToServer(RPC.PredictWalking,nil,nil,nil,nil,nil,nil,nil,true) end
+            -- StopWalking已清理服务端预测数据，切入攻击只需这一条停止。
             if RPC.StopWalking then SendRPCToServer(RPC.StopWalking) end
             self.shadowself_predicting=nil
         end
@@ -187,7 +187,6 @@ do --走向和攻击函数
 		local x, z = animpos.x, animpos.z
 		doPredictwalk(x, z)
 		SendRPCToServer(RPC.LeftClick, ACTIONS.WALKTO.code, x, z)
-		doPredictwalk(x, z)
 	end
 
 	--原地走位打断后摇
@@ -223,7 +222,9 @@ do --走向和攻击函数
 		elseif ThePlayer.components.playercontroller:CanLocomote() and not ThePlayer.components.playercontroller.ismastersim then
 			local act = BufferedAction(ThePlayer.components.playercontroller.inst, target, ACTIONS.ATTACK)
 			if act ~= nil then
+				local sent=false
 				act.preview_cb = function()
+                    if sent then return end;sent=true
 					SendRPCToServer(RPC.LeftClick, ACTIONS.ATTACK.code, pos.x, pos.z, target, true, 10,
 						nil, nil)
 				end
@@ -533,6 +534,7 @@ end) ]]
 				and MOD_util:GetMOption("hitandrun_dt_runaway", HitAndRun.dt_runaway) then
 				walkway = HitAndRun:RunAwayOverride(HitAndRun.ent) or walkway
 			end
+			if HitAndRun.shadowself_hold_ground and HitAndRun.shadowself_hold_ground() then walkway="shadowself_hold" end
 			HitAndRun.final_walkway = walkway
 			local oops
 			if not ThePlayer:HasTag("attack") then
@@ -561,6 +563,10 @@ end) ]]
 					HitAndRun.p_range + HitAndRun.ent:GetPhysicsRadius(0) - HitAndRun.rangeoffset,
 					HitAndRun.ent, true)
 				HitAndRun.skip_attack_num = 1 --为了远离
+				HitAndRun.last_fa_time, HitAndRun.guid = GetTime(), HitAndRun.ent.GUID
+			elseif walkway == "shadowself_hold" then
+				oops = false -- 持续攻击阶段不能用随后兜底的WALKTO取消刚提交的攻击。
+				HitAndRun:CloseAndAttack(HitAndRun.ent)
 				HitAndRun.last_fa_time, HitAndRun.guid = GetTime(), HitAndRun.ent.GUID
 			elseif walkway == true then
 				HitAndRun:PredictWalkTo(HitAndRun.ppos, HitAndRun.pos, -walkrange,

@@ -21,7 +21,7 @@ function CombatButton:OnUpdate()
     -- Read the current slot every frame to follow HUD scale, backpacks and mods.
     local p=slot:GetWorldPosition();local origin=inv:GetWorldPosition();local scale=inv:GetScale()
     self:SetPosition((p.x-origin.x)/scale.x,(p.y-origin.y)/scale.y+48)
-    self.button:SetText(r.control.phase and "停止接管" or "战斗接管")
+    self.button:SetText(r.control.pending and "同意接管" or (r.control.phase and "停止接管" or "战斗接管"))
     self:Show()
 end
 return CombatButton

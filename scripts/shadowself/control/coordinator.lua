@@ -15,6 +15,7 @@ local Coordinator=Class(function(self,bridge,plan)
     self.bosses=require("shadowself/control/bosses")(self)
     self.encounters=require("shadowself/control/encounters")(self)
     self.supplies=require("shadowself/control/supplies")(self)
+    if self.supplies.Check then self.supplies:Check() end
     if plan.arena then self.healing=plan.arena_healing or require("shadowself/control/arena_healing")(self.player) end
     if self.player.prefab=="waxwell" then self.maxwell=require("shadowself/control/maxwell")(self) end
 end)
@@ -50,6 +51,9 @@ function Coordinator:SafeMovePoint(point)
     return nav.Select(self,point,primary)
 end
 function Coordinator:Move(point,label)
+ if self.plan and self.plan.arena and self.plan.arena_wave then
+  require("shadowself/control/arena_late_travel").Tick(self.player,self.plan.arena_wave())
+ end
     if self.crabking then self.crabking:Interrupt() end
     require("shadowself/control/queenflute").Interrupt(self,"external_move:"..tostring(label))
     self.blocked=true;self.status=label;self.last_action_kind="move";self.last_point=point
@@ -89,6 +93,9 @@ function Coordinator:Scan()
     end
     if self.plan and self.plan.arena and self.plan.arena_wave and self.plan.arena_wave()==2 then
         for _,zone in ipairs(require("shadowself/control/arena_fire").WebZones(self.player,TheSim:FindEntities(pos.x,0,pos.z,30,nil,{"INLIMBO"}))) do self.hazards[#self.hazards+1]=zone end
+    end
+    if self.plan and self.plan.arena and self.plan.arena_wave and self.plan.arena_wave()==10 then
+        for _,z in ipairs(require("shadowself/control/arena_fire").LavaZones(TheSim:FindEntities(pos.x,0,pos.z,40,nil,{"INLIMBO"}))) do self.hazards[#self.hazards+1]=z end
     end
     if self.beequeen then
         for _,v in ipairs(self.beequeen.predicted or {}) do if now<v.untiltime then self.hazards[#self.hazards+1]=v end end
@@ -155,6 +162,11 @@ end
 -- Minimal native bridge. Old Pack/PermitAttack/gear movement code is not called
 -- by combat.lua; ordinary enemies retain the exact original 3014 execution path.
 function Coordinator:NativePulse()
+    local doc=require("shadowself/control/arena_doc_control")
+    if require("shadowself/control/arena_doc_boss").Owns(self) then self.blocked=true;return end
+    doc.Protect(self)
+    if require("shadowself/control/boneguard").Attack(self,self.h.ent) then return end
+    if self.plan and self.plan.arena_clockwork then self.plan.arena_clockwork:Observe(self) end
     self.blocked=false;self.special_active=false;self.queen_active=false;self.target=self.h.ent
     local target=self.h.ent
     if self.brightshade_target and self.bosses then
@@ -164,7 +176,7 @@ function Coordinator:NativePulse()
     end
     local queenfight=target and (target.prefab=="beequeen" or target.prefab=="beeguard")
         or self.beequeen and self.beequeen.queen
-    if queenfight or self.maxwell then
+    if not doc.Late(self) and (queenfight or self.maxwell) then
         self:Scan()
         self.beequeen=self.beequeen or require("shadowself/control/beequeen")(self)
         if self.beequeen:Tick() then self.special_active=true;self.queen_active=true;return end
@@ -249,5 +261,5 @@ function Coordinator:PermitAttack()
     -- 旧 AI 的联合作战窗口：当前目标以外的前摇覆盖落点时不补刀。
     return true
 end
-function Coordinator:Stop() if self.encounters then self.encounters:Stop() end;if self.mechanisms then self.mechanisms:Stop() end;if self.maxwell then self.maxwell:Stop() end;self.actions:Stop();self.gear:Reset();self.tactics:Reset() end
+function Coordinator:Stop() require("shadowself/control/arena_doc_boss").Stop(self);if self.encounters then self.encounters:Stop() end;if self.mechanisms then self.mechanisms:Stop() end;if self.maxwell then self.maxwell:Stop() end;self.actions:Stop();self.gear:Reset();self.tactics:Reset() end
 return Coordinator

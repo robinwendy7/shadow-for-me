@@ -86,8 +86,12 @@ function Encounters:Penguins(target)
     end
     if #birds==0 then return end
     local flute
-    for _,i in ipairs(A.Items(c.player)) do if i.prefab=="panflute" then flute=i;break end end
-    if not flute then return end
+    local tools=require("shadowself/control/arena_tools")
+    for _,i in ipairs(A.Items(c.player)) do if i.prefab=="panflute" and tools.Usable(i) then flute=i;break end end
+    if not flute then
+        if c.plan and c.plan.arena and tools.Recover(c,"panflute") then return "support",nearest end
+        return
+    end
     self:Target(nearest)
     local now=GetTime()
     if self.bird_wait then
@@ -141,6 +145,23 @@ function Encounters:Goats(target)
         local mode,picked=self.arena_goats:Tick(goats)
         if mode then return mode,picked end
     end
+    if c.arena_goat_melee and c.plan and c.plan.arena_wave and c.plan.arena_wave()==6 then
+        local straw
+        for _,item in ipairs(A.Items(c.player)) do
+            local eq=item.replica and item.replica.equippable
+            if item.prefab=="strawhat" and item:IsValid() and not item:HasTag("broken") and eq
+                and eq:EquipSlot()==EQUIPSLOTS.HEAD and not (eq.IsRestricted and eq:IsRestricted(c.player)) then straw=item;break end
+        end
+        if straw then
+            c.gear.protected_slots={[EQUIPSLOTS.HEAD]=true}
+            if c.player.replica.inventory:GetEquippedItem(EQUIPSLOTS.HEAD)~=straw then
+                c.bridge:PauseAttack();c.mechanisms:Equip(straw);return "support",target
+            end
+        elseif charged and self:Insulate(goats) then return "support",target end
+        local best,near;local pos=c.player:GetPosition()
+        for _,e in ipairs(goats) do local d=pos:DistSq(e:GetPosition());if not near or d<near then best,near=e,d end end
+        self:Release();return "attack",self:Target(best or target)
+    end
     if charged and self:Insulate(goats) then return "support",target end
     if #goats<2 then self.goat=nil;self:Release();return end
     local now=GetTime();local pos=c.player:GetPosition();local state=self.goat
@@ -172,7 +193,33 @@ function Encounters:Goats(target)
     end end
     self:Release();return "attack",self:Target(best or target)
 end
+-- 兔王及召唤物沿用正常武器/走位；选中小兔人时也不能落入通用旋风清群。
+function Encounters:RabbitMelee(target)
+    local plan=self.c.plan
+    if not plan or not plan.arena then return false end
+    local function rabbit(e)
+        return live(e) and (e.prefab=="rabbitking_aggressive" or e.prefab=="rabbitkingminion_bunnyman")
+    end
+    if rabbit(target) then return true end
+    for _,list in ipairs({self.c.enemies or {},plan.arena_remaining and plan.arena_remaining() or {}}) do
+        for _,e in ipairs(list) do if rabbit(e) then return true end end
+    end
+    return false
+end
 function Encounters:Tick(target)
+    local patrol_mode,patrol_target=self:Patrol(target)
+    if patrol_mode then return patrol_mode,patrol_target end
+    local hunt=self.c.plan and self.c.plan.arena_walrus
+    if hunt and hunt.active and hunt.target then self:Release();return "attack",self:Target(hunt.target) end
+    local whip=self.c.plan and self.c.plan.arena_whip_state
+    if whip and whip.active and require("shadowself/control/arena_tools").Recover(self.c,"whip",function(item)
+        return whip.active and whip:CanPickup(self.c.player,item)
+    end) then
+        if whip.moving then self.c.travel:EndDodge(self.c.snapshot);whip.moving=nil end
+        return "support",target
+    end
+    if whip and whip:Evade(self.c) then return "move",target end
+    if whip and whip.active and not whip:CanAttack(self.c.player) then return "support",target end
     local previous_wind=self.c.arena_wind;self.c.arena_wind=nil
     self.c.bridge.priority_target=self.c.plan and self.c.plan.arena_priority and self.c.plan.arena_priority() or nil;self.allowed={}
     if target.prefab~="lightninggoat" then self.c.gear.protected_slots=nil end
@@ -185,7 +232,10 @@ function Encounters:Tick(target)
     if not mode then mode,picked=self:Walrus(target) end
     if not mode then mode,picked=self:Penguins(target) end
     if not mode then mode,picked=self:Goats(target) end
-    if not mode and self.c.plan and self.c.plan.arena then
+    if not mode and self.c.plan and self.c.plan.arena and not self.c.plan.arena_stage11 and not self:RabbitMelee(target)
+     and not require("shadowself/control/arena_bats").Active(self.c)
+     and not (self.c.plan.arena_spider_scene and self.c.plan.arena_spider_scene())
+     and not (whip and whip.active and self.c.plan.arena_wave and self.c.plan.arena_wave()==2) then
         local crowd={};local policy=require("shadowself/control/targetpolicy")
         for _,e in ipairs(self.c.enemies) do
             if live(e) and policy.Creature(e) and not policy.Boss(e) and self.c.bridge.allowed(e) then crowd[#crowd+1]=e end
@@ -198,6 +248,28 @@ function Encounters:Tick(target)
     if previous_wind and previous_wind~=self.c.arena_wind then previous_wind:Stop() end
     if not mode then self:Release() end
     return mode,picked
+end
+function Encounters:Patrol(target)
+ local Rabbit=require("shadowself/control/arena_rabbit")
+ if self.rabbit or Rabbit.Required(self.c) then
+  self.rabbit=self.rabbit or Rabbit(self)
+  local mode,picked=self.rabbit:Tick();if mode then return mode,picked end
+ end
+ local mode,picked=self:Salamanders();if mode then return mode,picked end
+ mode,picked=require("shadowself/control/arena_swamp").Tick(self);if mode then return mode,picked end
+ local c=self.c;local wave=c.plan and c.plan.arena and c.plan.arena_wave and c.plan.arena_wave()
+ if wave==5 then
+  self.arena_hunts=self.arena_hunts or require("shadowself/control/arena_hunts")(self)
+  return self.arena_hunts:Pirates(c.plan.arena_remaining and c.plan.arena_remaining() or c.enemies)
+ elseif wave==6 then
+  for _,e in ipairs(c.enemies) do if e.prefab=="lightninggoat" and live(e) then return self:Goats(e) end end
+ end
+end
+function Encounters:Salamanders()
+ local policy=require("shadowself/control/arena_salamanders")
+ if not self.salamanders and not policy.Required(self.c) then return end
+ self.salamanders=self.salamanders or policy(self)
+ return self.salamanders:Tick()
 end
 function Encounters:Dodge(target,base)
     if not penguin(target) or target:HasTag("sleeping") then return base end
@@ -215,5 +287,5 @@ function Encounters:Dodge(target,base)
     end
     return base
 end
-function Encounters:Stop() if self.c.arena_wind then self.c.arena_wind:Stop() end;self:Release();self.c.gear.protected_slots=nil end
+function Encounters:Stop() if self.rabbit then self.rabbit:Stop() end;if self.c.arena_wind then self.c.arena_wind:Stop() end;self:Release();self.c.gear.protected_slots=nil end
 return Encounters

@@ -11,7 +11,9 @@ local function anim(e,name) return e.AnimState and e.AnimState:IsCurrentAnimatio
 local function frame(e) return e.AnimState:GetCurrentAnimationFrame() or 0 end
 local function parent(e) return e.entity and e.entity:GetParent() end
 function Mechanisms:Item(name)
-    for _,i in ipairs(A.Items(self.c.player)) do if i.prefab==name then return i end end
+    for _,i in ipairs(A.Items(self.c.player)) do if i.prefab==name then
+        return name=="armorskeleton" and require("shadowself/control/arena_bone_maintenance").Select(self.c.player,i) or i
+    end end
 end
 function Mechanisms:Equip(item)
     local p=self.c.player;local eq=item and item.replica and item.replica.equippable
@@ -43,14 +45,21 @@ function Mechanisms:Scan()
             local exit=math.max(0,radius-math.sqrt(p:DistSq(e:GetPosition())))/math.max(1,c:Speed())
             if remaining<=exit+.3 or anim(e,"explode") then self.zones[#self.zones+1]={pos=e:GetPosition(),radius=radius,source=e} end
         elseif name:find("sandspike_",1,true)==1 then
-            local pre=anim(e,"short_pre") or anim(e,"med_pre") or anim(e,"tall_pre")
-            if not anim(e,"short_pst") and not anim(e,"med_pst") and not anim(e,"tall_pst") then
+            local size=name:sub(11)
+            if not anim(e,size.."_break") and not e:HasTag("dead") and not e:HasTag("isdead") then
                 local r=name=="sandspike_tall" and .6 or name=="sandspike_med" and .4 or .2
-                self.zones[#self.zones+1]={pos=e:GetPosition(),radius=r+.5+c.player:GetPhysicsRadius(0)+.25,source=e}
+                -- sand_spike.lua: pre结束后，pst第2帧才DoDamage；之后仍保留碰撞体。
+                local impact=not anim(e,size.."_pst") or frame(e)<=2+require("shadowself/control/nettiming").Frames(c)
+                self.zones[#self.zones+1]={pos=e:GetPosition(),radius=r+c.player:GetPhysicsRadius(0)+(impact and .75 or .2),source=e,ant_obstacle=true}
             end
-        elseif name=="sandblock" and not self.hidden[e] then
-            self.hidden[e]=e.AnimState.GetMultColour and {e.AnimState:GetMultColour()} or {1,1,1,1}
-            e.AnimState:SetMultColour(1,1,1,0) -- 本地视觉；保留碰撞和真实沙堡。
+        elseif name=="sandblock" then
+            if not anim(e,"block_break") and not e:HasTag("dead") and not e:HasTag("isdead") then
+                self.zones[#self.zones+1]={pos=e:GetPosition(),radius=1.1+c.player:GetPhysicsRadius(0)+.2,source=e,ant_obstacle=true}
+            end
+            if not self.hidden[e] then
+                self.hidden[e]=e.AnimState.GetMultColour and {e.AnimState:GetMultColour()} or {1,1,1,1}
+                e.AnimState:SetMultColour(1,1,1,0) -- 本地视觉；保留碰撞和真实沙堡。
+            end
         elseif name=="sharkboi" and (anim(e,"icedive_jump_pre") or anim(e,"icedive_jump") or anim(e,"icedive_dig_pre") or anim(e,"spawn") and frame(e)<20) then
             -- 地下钻出前不可索敌，也必须从机制扫描直接启动避让。
             self.zones[#self.zones+1]={pos=e:GetPosition(),radius=2+c.player:GetPhysicsRadius(0)+.6,source=e}
@@ -81,9 +90,11 @@ function Mechanisms:Escape()
     local target=c.h and c.h.ent
     if target and target.prefab=="antlion" and c.bosses then
         c.bosses.routes:RememberAnt()
-        local saved=self.ant_escape
-        if saved and saved.target==target and p:DistSq(saved.point)>.35^2 and Nav.Safe(c,saved.point,target) then best=saved.point
-        else best=c.bosses.routes:AntPoint(target);self.ant_escape={target=target,point=best} end
+        best=c.bosses.routes:AntStep(target,true)
+        if not best then
+            c.hazards=original;c.bridge:PauseAttack();return false
+        end
+        self.ant_escape={target=target,point=best}
         c.travel:BeginDodge(c.snapshot);c:Move(best,"蚁狮 · 沿可通行圆周按序躲地刺")
         c.hazards=original;self.escaping=true;return true
     end
@@ -148,13 +159,18 @@ end
 function Mechanisms:Pickup()
     local c=self.c;local p=c.player;local now=GetTime();local hand=p.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)
     if hand and hand:HasTag("weapon") and hand.prefab~="cane" and hand.prefab~="orangestaff" then self.last_weapon=hand end
+    local Travel=require("shadowself/control/arena_pickup_travel")
+    local wave=c.plan and c.plan.arena and c.plan.arena_wave and c.plan.arena_wave() or 1
+    local function allowed(item) return not (c.plan and c.plan.arena) or require("shadowself/control/arena_policy").PickupAllowed(item,wave,c.player) end
+    local function allow(item) return allowed(item) and (not (c.plan and c.plan.arena) or require("shadowself/control/arena_policy").AllowArmor(item,wave,c.enemies)) end
+    if self.pickup and not allowed(self.pickup) then A.Stop(p);self.pickup=nil;self.picked=nil;Travel.Release(self) end
     if self.pickup and self.pickup:IsValid() and not parent(self.pickup) and not self.pickup:HasTag("INLIMBO") then
-        if now<(self.pickup_until or 0) then return true end
-        self.pickup=nil
+        if now<(self.pickup_until or 0) then Travel.Ready(self,p,wave,self.pickup,c);return true end
+        self.pickup=nil;Travel.Release(self)
     end
     if self.picked and self.picked:IsValid() and c.gear:Owned(self.picked) then
-        local item=self.picked;self.picked=nil
-        if item.replica.equippable:EquipSlot()~=EQUIPSLOTS.HANDS then self:Equip(item) else c.gear:Swap("attack",c.snapshot) end
+        local item=self.picked;self.picked=nil;Travel.Release(self)
+        if item.replica.equippable:EquipSlot()~=EQUIPSLOTS.HANDS then if allow(item) then self:Equip(item) end else c.gear:Swap("attack",c.snapshot) end
     end
     if now<(self.next_pickup or 0) then return false end
     self.next_pickup=now+.3
@@ -163,15 +179,21 @@ function Mechanisms:Pickup()
         local eq=item.replica and item.replica.equippable
         local armour=armour_score(item)
         local current=eq and p.replica.inventory:GetEquippedItem(eq:EquipSlot())
-        local protected=eq and c.gear.protected_slots and c.gear.protected_slots[eq:EquipSlot()]
-        local upgrade=not protected and armour and armour>(armour_score(current) or 0)+.1
-        if eq and not parent(item) and (item==self.last_weapon or upgrade) and not item:HasTag("broken")
+        local protected=eq and (c.gear.protected_slots and c.gear.protected_slots[eq:EquipSlot()]
+            or c.plan and c.plan.arena_lunar12 and (eq:EquipSlot()==EQUIPSLOTS.HEAD or eq:EquipSlot()==EQUIPSLOTS.BODY)
+            or c.plan and c.plan.arena_stage11 and eq:EquipSlot()==EQUIPSLOTS.HEAD)
+        local upgrade=not protected and allow(item) and armour and armour>(armour_score(current) or 0)+.1
+        if eq and allowed(item) and not parent(item) and (item==self.last_weapon or upgrade) and not item:HasTag("broken")
             and not (eq.IsRestricted and eq:IsRestricted(p)) and Nav.Safe(c,item:GetPosition()) then
             local value=pos:DistSq(item:GetPosition())+(item==self.last_weapon and -100 or 0)
             if not score or value<score then chosen,score=item,value end
         end
     end
-    if chosen and A.Scene(p,chosen,ACTIONS.PICKUP) then
+    if chosen and not Travel.Ready(self,p,wave,chosen,c) then return true end
+    if chosen and A.Scene(p,chosen,ACTIONS.PICKUP,function()
+        local current=c.plan and c.plan.arena_wave and c.plan.arena_wave() or wave
+        return not (c.plan and c.plan.arena) or require("shadowself/control/arena_policy").PickupAllowed(chosen,current,c.player)
+    end) then
         self.pickup=chosen;self.picked=chosen;self.pickup_until=now+math.sqrt(pos:DistSq(chosen:GetPosition()))/math.max(1,c:Speed())+1
         return true
     end
@@ -187,12 +209,19 @@ function Mechanisms:Honey()
 end
 function Mechanisms:Incoming()
  local c=self.c
+ local rhythm=c.plan and c.plan.arena_clockwork
+ if rhythm and rhythm:Live() then
+  if self.incoming then c.travel:EndDodge(c.snapshot);self.incoming=nil end
+  return false
+ end
  local q=require("shadowself/control/incoming").Point(c,c.bosses and c.bosses.entities or c.enemies)
  if q then c.bridge:PauseAttack();c.travel:BeginDodge(c.snapshot);c:Move(q,"群战 · 优先横移躲侧方冲刺／飞踢");self.incoming=true;return true end
  if self.incoming then c.travel:EndDodge(c.snapshot);self.incoming=nil end
  return false
 end
 function Mechanisms:Tick()
+    if require("shadowself/control/arena_bats").Detach(self.c) then return true end
+    if require("shadowself/control/arena_slurper").Tick(self.c) then return true end
     self:Scan()
     local retained={}
     for _,z in ipairs(self.c.hazards) do if not z.mechanism then retained[#retained+1]=z end end
@@ -226,6 +255,8 @@ function Mechanisms:Tick()
     if self:Missile() then return true end
     if self:Escape() then return true end
     if self.escaping then self.c.travel:EndDodge(self.c.snapshot);self.escaping=nil end
+    local strike=self.c.bosses and self.c.bosses.snail_strike
+    if strike and GetTime()<strike.until_time then return false end -- 危险已检查；补给不能抢火把动作。
     local target=self.c.h and self.c.h.ent
     if target and target.prefab=="klaus" then
         local bone=self:Item("armorskeleton")
@@ -235,7 +266,11 @@ function Mechanisms:Tick()
             self:Equip(bone);return true
         end
     end
-    if self.c.plan and self.c.plan.arena and require("shadowself/control/arena_tools").Recover(self.c,"panflute") then return true end
+    if self.c.plan and self.c.plan.arena and self.c.plan.arena_wave and self.c.plan.arena_wave()==9
+     and require("shadowself/control/arena_tools").Recover(self.c,"sweettea") then return true end
+    if self.c.plan and self.c.plan.arena and not require("shadowself/control/arena_salamanders").Required(self.c)
+     and not require("shadowself/control/arena_swamp").Required(self.c)
+     and require("shadowself/control/arena_tools").Recover(self.c,"panflute") then return true end
     return self:Pickup()
 end
 function Mechanisms:Dodge(target,base)
